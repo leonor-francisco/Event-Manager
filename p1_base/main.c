@@ -42,13 +42,6 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Failed to initialize EMS\n");
     return 1;
   }
-
-  /*DIR *jobsDirectory = verifyDirectory(argv[1]);
-  if(jobsDirectory == NULL) {
-    fprintf(stderr, "Error opening directory\n");
-    return 1;
-  }*/
-  printf("0 %s\n", argv[1]);
   DIR *jobsDirectory = opendir(argv[1]);
   if (jobsDirectory == NULL) {
     fprintf(stderr, "Error opening directory '%s'\n", argv[1]);
@@ -68,6 +61,7 @@ int main(int argc, char *argv[]) {
     unsigned int event_id, delay;
     size_t num_rows, num_columns, num_coords;
     size_t xs[MAX_RESERVATION_SIZE], ys[MAX_RESERVATION_SIZE];
+
     char *fileName = entry -> d_name;
     char *path = (char *)malloc(strlen("../jobs/")+strlen(fileName)); 
     strcpy(path, "jobs/");
@@ -75,20 +69,16 @@ int main(int argc, char *argv[]) {
     int fd = open(path, O_RDONLY);
     free(path);
     
-
-    //printf("> ");
-    //fflush(stdout);
-    size_t suffix_pos = strlen(fileName) - strlen(".jobs");
-    fileName[suffix_pos] = '\0';
+    fileName[strlen(fileName) - strlen(".jobs")] = '\0';
     char *outPath = (char *)malloc(strlen("../jobs/")+strlen(".out") +strlen(fileName)); 
     strcpy(outPath, "jobs/");
     strcat(outPath, fileName);
     strcat(outPath, ".out");
-    printf("%s\n", outPath);
 
-    int outFile = open(outPath, O_WRONLY);
-    int a;
+    int outFile = open(outPath, O_WRONLY | O_CREAT | O_TRUNC);
     free(outPath);
+    int a;
+    
 
     
     while((a = get_next(fd)) != EOC) {
@@ -146,7 +136,7 @@ int main(int argc, char *argv[]) {
             }
 
             if (delay > 0) {
-              printf("Waiting...\n");
+              write(outFile, "Waiting...\n", sizeof("Waiting...\n"));
               ems_wait(delay);
             }
 
@@ -157,7 +147,7 @@ int main(int argc, char *argv[]) {
             break;
 
           case CMD_HELP:
-            printf(
+            write(outFile,
                 "Available commands:\n"
                 "  CREATE <event_id> <num_rows> <num_columns>\n"
                 "  RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
@@ -165,7 +155,16 @@ int main(int argc, char *argv[]) {
                 "  LIST\n"
                 "  WAIT <delay_ms> [thread_id]\n"  // thread_id is not implemented
                 "  BARRIER\n"                      // Not implemented
-                "  HELP\n");
+                "  HELP\n", sizeof(
+                  "Available commands:\n"
+                "  CREATE <event_id> <num_rows> <num_columns>\n"
+                "  RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
+                "  SHOW <event_id>\n"
+                "  LIST\n"
+                "  WAIT <delay_ms> [thread_id]\n"  
+                "  BARRIER\n"                      
+                "  HELP\n"
+                ));
 
             break;
 

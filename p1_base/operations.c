@@ -190,21 +190,23 @@ int ems_show(unsigned int event_id, int writeFile) {
   return 0;
 }
 
-int ems_list_events() {
+int ems_list_events(int writeFile) {
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
     return 1;
   }
 
   if (event_list->head == NULL) {
-    printf("No events\n");
+    write(writeFile, "No events\n", sizeof("No events\n"));
     return 0;
   }
 
   struct ListNode* current = event_list->head;
   while (current != NULL) {
-    printf("Event: ");
-    printf("%u\n", (current->event)->id);
+    write(writeFile, "Event: ", sizeof("Event: "));
+    char buffer[256];
+    sprintf(buffer, "%u", (current->event)->id);
+    write(writeFile, buffer, strlen(buffer));
     current = current->next;
   }
 
