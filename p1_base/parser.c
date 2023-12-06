@@ -1,5 +1,5 @@
 #include "parser.h"
-
+#include <stdio.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,17 +46,15 @@ static void cleanup(int fd) {
 
 enum Command get_next(int fd) {
   char buf[16];
-  if (read(fd, buf, 1) != 1) {
+  if (read(fd, buf, 1) != 1){
     return EOC;
   }
-
   switch (buf[0]) {
     case 'C':
       if (read(fd, buf + 1, 6) != 6 || strncmp(buf, "CREATE ", 7) != 0) {
         cleanup(fd);
         return CMD_INVALID;
       }
-
       return CMD_CREATE;
 
     case 'R':

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <dirent.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "eventlist.h"
 
@@ -173,14 +175,16 @@ int ems_show(unsigned int event_id, int writeFile) {
   for (size_t i = 1; i <= event->rows; i++) {
     for (size_t j = 1; j <= event->cols; j++) {
       unsigned int* seat = get_seat_with_delay(event, seat_index(event, i, j));
-      write(writeFile, "%u", *seat);
+      char buffer[256];
+      sprintf(buffer, "%u", *seat );
+      write(writeFile, buffer, strlen(buffer));
 
       if (j < event->cols) {
-        write(writeFile, " ");
+        write(writeFile, " ", 1);
       }
     }
 
-    write(writeFile, "\n");
+    write(writeFile, "\n", 1);
   }
 
   return 0;
