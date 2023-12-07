@@ -171,6 +171,7 @@ int ems_show(unsigned int event_id, int writeFile) {
     fprintf(stderr, "Event not found\n");
     return 1;
   }
+  
 
   for (size_t i = 1; i <= event->rows; i++) {
     for (size_t j = 1; j <= event->cols; j++) {
@@ -178,6 +179,7 @@ int ems_show(unsigned int event_id, int writeFile) {
       char buffer[256];
       sprintf(buffer, "%u", *seat );
       write(writeFile, buffer, strlen(buffer));
+
 
       if (j < event->cols) {
         write(writeFile, " ", 1);

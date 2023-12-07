@@ -11,24 +11,12 @@
 #include "parser.h"
 #include <linux/limits.h>
 
-/*DIR *verifyDirectory(const char *path) {
-    DIR *dir;
-    dir = opendir(path);
-
-    if (dir == NULL) {
-        perror("Error opening directory");
-        return NULL;
-    }
-    
-    return dir;
-}*/
-
 int main(int argc, char *argv[]) {
   unsigned int state_access_delay_ms = STATE_ACCESS_DELAY_MS;
 
   if (argc > 1) {
     char *endptr;
-    unsigned long int delay = strtoul(argv[2], &endptr, 10);
+    unsigned long int delay = strtoul(argv[1], &endptr, 10);
 
     if (*endptr != '\0' || delay > UINT_MAX) {
       fprintf(stderr, "Invalid delay value or value too large\n");
@@ -42,9 +30,9 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Failed to initialize EMS\n");
     return 1;
   }
-  DIR *jobsDirectory = opendir(argv[1]);
+  DIR *jobsDirectory = opendir(argv[2]);
   if (jobsDirectory == NULL) {
-    fprintf(stderr, "Error opening directory '%s'\n", argv[1]);
+    fprintf(stderr, "Error opening directory '%s'\n", argv[2]);
     return 1;  
   }
 
@@ -53,11 +41,10 @@ int main(int argc, char *argv[]) {
 
   
   while ((entry = readdir(jobsDirectory)) != NULL) {
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-      continue;
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 ||
+        strstr(entry->d_name, ".jobs") == NULL) {
+        continue;
     }
-    
-    printf("2. %s\n", entry->d_name);
     unsigned int event_id, delay;
     size_t num_rows, num_columns, num_coords;
     size_t xs[MAX_RESERVATION_SIZE], ys[MAX_RESERVATION_SIZE];
@@ -78,17 +65,13 @@ int main(int argc, char *argv[]) {
     int outFile = open(outPath, O_WRONLY | O_CREAT | O_TRUNC);
     free(outPath);
     int a;
-    
-
-    
     while((a = get_next(fd)) != EOC) {
       switch (a) {
-          case CMD_CREATE: {
+          case CMD_CREATE:
             if (parse_create(fd, &event_id, &num_rows, &num_columns) != 0) {
               fprintf(stderr, "Invalid command. See HELP for usage\n");
               continue;
             }
-          }
 
             if (ems_create(event_id, num_rows, num_columns)) {
               fprintf(stderr, "Failed to create event\n");
@@ -123,7 +106,7 @@ int main(int argc, char *argv[]) {
             break;
 
           case CMD_LIST_EVENTS:
-            if (ems_list_events()) {
+            if (ems_list_events(outFile)) {
               fprintf(stderr, "Failed to list events\n");
             }
 
