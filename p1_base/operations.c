@@ -205,9 +205,8 @@ int ems_list_events(int writeFile) {
 
   struct ListNode* current = event_list->head;
   while (current != NULL) {
-    write(writeFile, "Event: ", sizeof("Event: "));
     char buffer[256];
-    sprintf(buffer, "%u", (current->event)->id);
+    sprintf(buffer, "Event: %u\n", (current->event)->id);
     write(writeFile, buffer, strlen(buffer));
     current = current->next;
   }
