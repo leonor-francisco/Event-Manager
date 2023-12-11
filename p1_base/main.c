@@ -8,71 +8,98 @@
 #include <sys/wait.h>
 #include <pthread.h>
 
-
 #include "constants.h"
 #include "operations.h"
 #include "parser.h"
 #include <linux/limits.h>
 
 
-void chooseCommand(int a, int fd, int outFile, unsigned int *event_id, size_t *num_rows, size_t *num_columns,
-                    size_t xs[MAX_RESERVATION_SIZE], size_t ys[MAX_RESERVATION_SIZE],
-                    size_t num_coords, unsigned int delay) {
-  switch (a) {
-          case CMD_CREATE:
-            if (parse_create(fd, event_id, num_rows, num_columns) != 0) {
-              fprintf(stderr, "Invalid command. See HELP for usage\n");
-              return;
-            }
+typedef struct commandArgs {
+  pthread_t thread_id;
+  int threadIndex;
 
-            if (ems_create(event_id, num_rows, num_columns)) {
+  int a;
+  int fd;
+  int outFile;
+  unsigned int *event_id;
+  size_t *num_rows;
+  size_t *num_columns;
+  size_t xs[MAX_RESERVATION_SIZE];
+  size_t ys[MAX_RESERVATION_SIZE];
+  unsigned int *delay;
+} CommandArgs;
+
+
+void *chooseCommand(void *commandArgs);
+
+pthread_mutex_t mutex;
+
+
+
+
+
+void *chooseCommand(void *commandArgs) {
+  CommandArgs *args = (CommandArgs*) commandArgs;
+  switch (args -> a ) {
+          case CMD_CREATE:
+            if (parse_create(args -> fd, args -> event_id, args -> num_rows, args -> num_columns) != 0) {
+              fprintf(stderr, "Invalid command. See HELP for usage\n");
+              break;
+            }
+            pthread_mutex_lock(&mutex); //LOCK
+            if (ems_create(*args -> event_id, * args -> num_rows, * args -> num_columns)) {
               fprintf(stderr, "Failed to create event\n");
             }
+            pthread_mutex_unlock(&mutex); //UNLOCK
 
             break;
 
           case CMD_RESERVE:
-            num_coords = parse_reserve(fd, MAX_RESERVATION_SIZE, event_id, xs, ys);
+            size_t num_coords = parse_reserve(args -> fd, MAX_RESERVATION_SIZE, args -> event_id, args -> xs, args -> ys);
 
             if (num_coords == 0) {
               fprintf(stderr, "Invalid command. See HELP for usage\n");
-              return;
+              break;
             }
-
-            if (ems_reserve(event_id, num_coords, xs, ys)) {
+            pthread_mutex_lock(&mutex); //LOCK
+            if (ems_reserve(*args -> event_id, &num_coords, args -> xs, args -> ys)) {
               fprintf(stderr, "Failed to reserve seats\n");
             }
+            pthread_mutex_unlock(&mutex); //UNLOCK
 
             break;
 
           case CMD_SHOW:
-            if (parse_show(fd, event_id) != 0) {
+            if (parse_show(args -> fd, args -> event_id) != 0) {
               fprintf(stderr, "Invalid command. See HELP for usage\n");
-              return;
+              break;
             }
-      
-            if (ems_show(event_id, outFile)) {
+            pthread_mutex_lock(&mutex); //LOCK
+            if (ems_show(*args -> event_id, args -> outFile)) {
               fprintf(stderr, "Failed to show event\n");
             }
+            pthread_mutex_unlock(&mutex); //UNLOCK
 
             break;
 
           case CMD_LIST_EVENTS:
-            if (ems_list_events(outFile)) {
+            pthread_mutex_lock(&mutex); //LOCK
+            if (ems_list_events(args -> outFile)) {
               fprintf(stderr, "Failed to list events\n");
             }
+            pthread_mutex_unlock(&mutex); //UNLOCK
 
             break;
 
           case CMD_WAIT:
-            if (parse_wait(fd, delay, NULL) == -1) {  // thread_id is not implemented
+            if (parse_wait(args -> fd, args -> delay, NULL) == -1) {  // thread_id is not implemented
               fprintf(stderr, "Invalid command. See HELP for usage\n");
-              return -1;
+              break;
             }
-
-            if (delay > 0) {
-              write(outFile, "Waiting...\n", sizeof("Waiting...\n"));
-              ems_wait(delay);
+            
+            if (*args -> delay > 0) {
+              write(args -> outFile, "Waiting...\n", sizeof("Waiting...\n"));
+              ems_wait(*args -> delay);
             }
 
             break;
@@ -100,14 +127,13 @@ void chooseCommand(int a, int fd, int outFile, unsigned int *event_id, size_t *n
 
           case EOC:
             ems_terminate();
-            return 0;
+            break;
         }
   
+
+    
+  return NULL;
 }
-
-
-
-
 
 
 int main(int argc, char *argv[]) {
@@ -116,6 +142,8 @@ int main(int argc, char *argv[]) {
   int const MAX_PROC = atoi(argv[3]);
   int const MAX_THREADS = atoi(argv[4]);
 
+  int joinThreads[MAX_THREADS];
+  
   if (argc > 1) {
     char *endptr;
     unsigned long int delay = strtoul(argv[1], &endptr, 10);
@@ -141,6 +169,7 @@ int main(int argc, char *argv[]) {
   pid_t pid;
   int status;
   int process_id;
+  
 
   struct dirent *entry;
   while ((entry = readdir(jobsDirectory)) != NULL) {
@@ -164,6 +193,8 @@ int main(int argc, char *argv[]) {
     else
       continue;
 
+
+    
     unsigned int event_id, delay;
     size_t num_rows, num_columns, num_coords;
     size_t xs[MAX_RESERVATION_SIZE], ys[MAX_RESERVATION_SIZE];
@@ -184,20 +215,54 @@ int main(int argc, char *argv[]) {
     free(outPath);
 
     int a;
+    int i = 0;
+    CommandArgs thread[MAX_THREADS];
 
-    /*int thread_number = 1;
-    char thread_buffer;*/
+    pthread_mutex_init(&mutex, NULL);
+
     while((a = get_next(fd)) != EOC) {
+      
+      thread[i].a = a;
+      thread[i].delay = delay;
+      thread[i].event_id = event_id;
+      thread[i].fd = fd;
+      thread[i].num_columns = num_columns;
+      thread[i].num_rows = num_rows;
+      thread[i].outFile = outFile;
+      
+      for(int j = 0; j < MAX_RESERVATION_SIZE; j++) {
+        thread[i].xs[j] = xs[j];
+        thread[i].ys[j] = ys[j];
+      }
+      
+      pthread_create(&thread[i].thread_id, NULL, chooseCommand, (void*)(thread + i));
 
-      /*sprintf(thread_buffer, "thread%d", thread_number);
-      pthread_t pthread1;
-      pthread_create(&pthread1, NULL, );*/
-
-      chooseCommand(a, fd, outFile, &event_id, &num_rows, &num_columns, xs, ys, 
-                    num_coords, delay);
-        //thread_number++;
+      if(i > MAX_THREADS) {
+        for(int f = 0; f < MAX_THREADS; f++) {
+          if (joinThreads[f]) {
+            if(pthread_join(&thread[f].thread_id, NULL) != 0)
+              fprintf(stderr, "error joining thread.\n");
+            thread[f].threadIndex;
+            i--;
+            joinThreads[f] = 0;
+          }       
+        } 
+      }
+    }
+    
+    int f = 0;
+    //mudar para while (tem que se esperar que todas as threads acabem)
+    while(f <= ){
+        if (joinThreads[f]) {
+          if(pthread_join(&thread[f].thread_id, NULL) != 0)
+            fprintf(stderr, "error joining thread.\n");
+          joinThreads[f] = 0;
+          f++;
+        }
     }
 
+    
+    pthread_mutex_destroy(&mutex);
     close(fd);
     close(outFile);
     exit(EXIT_SUCCESS);
