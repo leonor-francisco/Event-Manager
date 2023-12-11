@@ -141,8 +141,6 @@ int main(int argc, char *argv[]) {
   int sonCount = 0;
   int const MAX_PROC = atoi(argv[3]);
   int const MAX_THREADS = atoi(argv[4]);
-
-  int joinThreads[MAX_THREADS];
   
   if (argc > 1) {
     char *endptr;
@@ -215,29 +213,52 @@ int main(int argc, char *argv[]) {
     free(outPath);
 
     int a;
-    int i = 0;
+    int threadCount;
     CommandArgs thread[MAX_THREADS];
+    int joinVerify[MAX_THREADS];
+
+    for(threadCount = 0; threadCount < MAX_THREADS; threadCount++)
+      thread[threadCount].threadIndex = threadCount;
+    threadCount = 0;
 
     pthread_mutex_init(&mutex, NULL);
 
     while((a = get_next(fd)) != EOC) {
       
-      thread[i].a = a;
-      thread[i].delay = delay;
-      thread[i].event_id = event_id;
-      thread[i].fd = fd;
-      thread[i].num_columns = num_columns;
-      thread[i].num_rows = num_rows;
-      thread[i].outFile = outFile;
+      int index = thread[threadCount].threadIndex;
+
+      thread[index].a = a;
+      thread[index].delay = delay;
+      thread[index].event_id = event_id;
+      thread[index].fd = fd;
+      thread[index].num_columns = num_columns;
+      thread[index].num_rows = num_rows;
+      thread[index].outFile = outFile;
       
       for(int j = 0; j < MAX_RESERVATION_SIZE; j++) {
-        thread[i].xs[j] = xs[j];
-        thread[i].ys[j] = ys[j];
+        thread[index].xs[j] = xs[j];
+        thread[index].ys[j] = ys[j];
       }
       
-      pthread_create(&thread[i].thread_id, NULL, chooseCommand, (void*)(thread + i));
+      pthread_create(&thread[index].thread_id, NULL, chooseCommand, (void*)(thread + i));
+      threadCount++;
+      joinVerify[index] = 1;
+      
 
-      if(i > MAX_THREADS) {
+      while(threadCount == MAX_THREADS) {
+        for(int f = 0; f < MAX_THREADS; f++) {
+          if (joinVerify[f]) {
+            if(pthread_join(&thread[f].thread_id, NULL) != 0)
+              fprintf(stderr, "error joining thread.\n");
+            thread[f].threadIndex = f;
+            threadCount--;
+            joinVerify[f] = 0;
+            break;
+          }
+        }
+      }
+
+        /*
         for(int f = 0; f < MAX_THREADS; f++) {
           if (joinThreads[f]) {
             if(pthread_join(&thread[f].thread_id, NULL) != 0)
@@ -246,22 +267,18 @@ int main(int argc, char *argv[]) {
             i--;
             joinThreads[f] = 0;
           }       
-        } 
-      }
+        } */
     }
-    
     int f = 0;
     //mudar para while (tem que se esperar que todas as threads acabem)
     while(f <= ){
-        if (joinThreads[f]) {
-          if(pthread_join(&thread[f].thread_id, NULL) != 0)
-            fprintf(stderr, "error joining thread.\n");
-          joinThreads[f] = 0;
-          f++;
-        }
+      if (joinThreads[f]) {
+        if(pthread_join(&thread[f].thread_id, NULL) != 0)
+          fprintf(stderr, "error joining thread.\n");
+        joinThreads[f] = 0;
+        f++;
+      }
     }
-
-    
     pthread_mutex_destroy(&mutex);
     close(fd);
     close(outFile);
