@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "constants.h"
 
@@ -44,93 +45,124 @@ static void cleanup(int fd) {
     ;
 }
 
-enum Command get_next(int fd) {
+enum Command get_next(int fd,  pthread_mutex_t mutex_get_next) {
   char buf[16];
+  int cmd;
+
+  pthread_mutex_lock(&mutex_get_next);
   if (read(fd, buf, 1) != 1){
-    return EOC;
+    cmd = EOC;
   }
-  switch (buf[0]) {
-    case 'C':
-      if (read(fd, buf + 1, 6) != 6 || strncmp(buf, "CREATE ", 7) != 0) {
+  else {
+    switch (buf[0]) {
+      case 'C':
+        if (read(fd, buf + 1, 6) != 6 || strncmp(buf, "CREATE ", 7) != 0) {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+        cmd = CMD_CREATE;
+        break;
+
+      case 'R':
+        if (read(fd, buf + 1, 7) != 7 || strncmp(buf, "RESERVE ", 8) != 0) {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        cmd = CMD_RESERVE;
+        break;
+
+      case 'S':
+        if (read(fd, buf + 1, 4) != 4 || strncmp(buf, "SHOW ", 5) != 0) {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        cmd = CMD_SHOW;
+        break;
+
+      case 'L':
+        if (read(fd, buf + 1, 3) != 3 || strncmp(buf, "LIST", 4) != 0) {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        if (read(fd, buf + 4, 1) != 0 && buf[4] != '\n') {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        cmd = CMD_LIST_EVENTS;
+        break;
+
+      case 'B':
+        if (read(fd, buf + 1, 6) != 6 || strncmp(buf, "BARRIER", 7) != 0) {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        if (read(fd, buf + 7, 1) != 0 && buf[7] != '\n') {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        cmd = CMD_BARRIER;
+        break;
+
+      case 'W':
+        if (read(fd, buf + 1, 4) != 4 || strncmp(buf, "WAIT ", 5) != 0) {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        cmd = CMD_WAIT;
+        break;
+
+      case 'H':
+        if (read(fd, buf + 1, 3) != 3 || strncmp(buf, "HELP", 4) != 0) {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        if (read(fd, buf + 4, 1) != 0 && buf[4] != '\n') {
+          cleanup(fd);
+          cmd = CMD_INVALID;
+          break;
+        }
+
+        cmd = CMD_HELP;
+        break;
+
+      case '#':
         cleanup(fd);
-        return CMD_INVALID;
-      }
-      return CMD_CREATE;
+        cmd = CMD_EMPTY;
+        break;
 
-    case 'R':
-      if (read(fd, buf + 1, 7) != 7 || strncmp(buf, "RESERVE ", 8) != 0) {
+      case '\n':
+        cmd = CMD_EMPTY;
+        break;
+      
+
+      default:
         cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      return CMD_RESERVE;
-
-    case 'S':
-      if (read(fd, buf + 1, 4) != 4 || strncmp(buf, "SHOW ", 5) != 0) {
-        cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      return CMD_SHOW;
-
-    case 'L':
-      if (read(fd, buf + 1, 3) != 3 || strncmp(buf, "LIST", 4) != 0) {
-        cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      if (read(fd, buf + 4, 1) != 0 && buf[4] != '\n') {
-        cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      return CMD_LIST_EVENTS;
-
-    case 'B':
-      if (read(fd, buf + 1, 6) != 6 || strncmp(buf, "BARRIER", 7) != 0) {
-        cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      if (read(fd, buf + 7, 1) != 0 && buf[7] != '\n') {
-        cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      return CMD_BARRIER;
-
-    case 'W':
-      if (read(fd, buf + 1, 4) != 4 || strncmp(buf, "WAIT ", 5) != 0) {
-        cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      return CMD_WAIT;
-
-    case 'H':
-      if (read(fd, buf + 1, 3) != 3 || strncmp(buf, "HELP", 4) != 0) {
-        cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      if (read(fd, buf + 4, 1) != 0 && buf[4] != '\n') {
-        cleanup(fd);
-        return CMD_INVALID;
-      }
-
-      return CMD_HELP;
-
-    case '#':
-      cleanup(fd);
-      return CMD_EMPTY;
-
-    case '\n':
-      return CMD_EMPTY;
-
-    default:
-      cleanup(fd);
-      return CMD_INVALID;
+        cmd = CMD_INVALID;
+        break;
+      
+    }
   }
+  
+  pthread_mutex_unlock(&mutex_get_next);
+
+  return cmd;
 }
 
 int parse_create(int fd, unsigned int *event_id, size_t *num_rows, size_t *num_cols) {

@@ -2,6 +2,7 @@
 #define EMS_PARSER_H
 
 #include <stddef.h>
+#include <pthread.h>
 
 enum Command {
   CMD_CREATE,
@@ -19,7 +20,7 @@ enum Command {
 /// Reads a line and returns the corresponding command.
 /// @param fd File descriptor to read from.
 /// @return The command read.
-enum Command get_next(int fd);
+enum Command get_next(int fd, pthread_mutex_t mutex_get_next);
 
 /// Parses a CREATE command.
 /// @param fd File descriptor to read from.

@@ -71,6 +71,7 @@ int ems_terminate() {
 }
 
 int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
+
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
     return 1;
@@ -87,13 +88,12 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     fprintf(stderr, "Error allocating memory for event\n");
     return 1;
   }
-
   event->id = event_id;
   event->rows = num_rows;
   event->cols = num_cols;
   event->reservations = 0;
   event->data = malloc(num_rows * num_cols * sizeof(unsigned int));
-
+  //fechar 
   if (event->data == NULL) {
     fprintf(stderr, "Error allocating memory for event data\n");
     free(event);
@@ -110,7 +110,6 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
     free(event);
     return 1;
   }
-
   return 0;
 }
 
@@ -160,6 +159,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
 }
 
 int ems_show(unsigned int event_id, int writeFile) {
+  printf("aqui estamos nos no s\n");
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
     return 1;
@@ -175,6 +175,7 @@ int ems_show(unsigned int event_id, int writeFile) {
 
   for (size_t i = 1; i <= event->rows; i++) {
     for (size_t j = 1; j <= event->cols; j++) {
+      printf("ele chega ao sitio certo no ems show\n");
       unsigned int* seat = get_seat_with_delay(event, seat_index(event, i, j));
       char buffer[256];
       sprintf(buffer, "%u", *seat );

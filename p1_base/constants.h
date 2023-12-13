@@ -2,3 +2,5 @@
 #define STATE_ACCESS_DELAY_MS 10
 #define AVAILABLE 1
 #define UNAVAILABLE 0
+#define JOINABLE 2
+#define ENDFILE 1
