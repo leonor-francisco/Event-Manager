@@ -2,6 +2,7 @@
 #define EVENT_LIST_H
 
 #include <stddef.h>
+#include <pthread.h>
 
 struct Event {
   unsigned int id;            /// Event id
@@ -9,7 +10,9 @@ struct Event {
 
   size_t cols;  /// Number of columns.
   size_t rows;  /// Number of rows.
-
+  
+  pthread_rwlock_t rwlock; // event lock
+  
   unsigned int* data;  /// Array of size rows * cols with the reservations for each seat.
 };
 

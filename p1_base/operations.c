@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "eventlist.h"
 
@@ -71,17 +72,14 @@ int ems_terminate() {
 }
 
 int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
-
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
     return 1;
   }
-
   if (get_event_with_delay(event_id) != NULL) {
     fprintf(stderr, "Event already exists\n");
     return 1;
   }
-
   struct Event* event = malloc(sizeof(struct Event));
 
   if (event == NULL) {
@@ -92,24 +90,24 @@ int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
   event->rows = num_rows;
   event->cols = num_cols;
   event->reservations = 0;
+  pthread_rwlock_init(&event->rwlock, NULL);
   event->data = malloc(num_rows * num_cols * sizeof(unsigned int));
-  //fechar 
+
   if (event->data == NULL) {
     fprintf(stderr, "Error allocating memory for event data\n");
     free(event);
     return 1;
   }
-
   for (size_t i = 0; i < num_rows * num_cols; i++) {
     event->data[i] = 0;
   }
-
   if (append_to_list(event_list, event) != 0) {
     fprintf(stderr, "Error appending event to list\n");
     free(event->data);
     free(event);
     return 1;
   }
+  printf("criou evento\n");
   return 0;
 }
 
@@ -125,7 +123,7 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
     fprintf(stderr, "Event not found\n");
     return 1;
   }
-
+  pthread_rwlock_wrlock(&event->rwlock);
   unsigned int reservation_id = ++event->reservations;
 
   size_t i = 0;
@@ -154,12 +152,11 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
     }
     return 1;
   }
-
+  pthread_rwlock_unlock(&event->rwlock);
   return 0;
 }
 
 int ems_show(unsigned int event_id, int writeFile) {
-  printf("aqui estamos nos no s\n");
   if (event_list == NULL) {
     fprintf(stderr, "EMS state must be initialized\n");
     return 1;
@@ -171,11 +168,11 @@ int ems_show(unsigned int event_id, int writeFile) {
     fprintf(stderr, "Event not found\n");
     return 1;
   }
+  pthread_rwlock_wrlock(&event->rwlock);
   
 
   for (size_t i = 1; i <= event->rows; i++) {
     for (size_t j = 1; j <= event->cols; j++) {
-      printf("ele chega ao sitio certo no ems show\n");
       unsigned int* seat = get_seat_with_delay(event, seat_index(event, i, j));
       char buffer[256];
       sprintf(buffer, "%u", *seat );
@@ -186,10 +183,9 @@ int ems_show(unsigned int event_id, int writeFile) {
         write(writeFile, " ", 1);
       }
     }
-
     write(writeFile, "\n", 1);
   }
-
+  pthread_rwlock_unlock(&event->rwlock);
   return 0;
 }
 

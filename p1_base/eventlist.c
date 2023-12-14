@@ -1,6 +1,7 @@
 #include "eventlist.h"
 
 #include <stdlib.h>
+#include <pthread.h>
 
 struct EventList* create_list() {
   struct EventList* list = (struct EventList*)malloc(sizeof(struct EventList));
@@ -32,6 +33,8 @@ int append_to_list(struct EventList* list, struct Event* event) {
 
 static void free_event(struct Event* event) {
   if (!event) return;
+
+  pthread_rwlock_destroy(&event->rwlock);
 
   free(event->data);
   free(event);
