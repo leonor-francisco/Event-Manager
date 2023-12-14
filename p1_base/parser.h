@@ -20,7 +20,7 @@ enum Command {
 /// Reads a line and returns the corresponding command.
 /// @param fd File descriptor to read from.
 /// @return The command read.
-enum Command get_next(int fd, pthread_mutex_t mutex_get_next);
+enum Command get_next(int fd);
 
 /// Parses a CREATE command.
 /// @param fd File descriptor to read from.

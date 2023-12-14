@@ -45,10 +45,8 @@ static void cleanup(int fd) {
     ;
 }
 
-enum Command get_next(int fd,  pthread_mutex_t mutex_get_next) {
+enum Command get_next(int fd) {
   char buf[16];
-
-  pthread_mutex_lock(&mutex_get_next);
   if (read(fd, buf, 1) != 1)
     return EOC;
 

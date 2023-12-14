@@ -23,124 +23,140 @@ void *chooseCommand(void *commandArgs) {
   CommandArgs *args = (CommandArgs*) commandArgs;
   unsigned int event_id, delay;
   size_t num_rows, num_columns, num_coords;
-  int commandLine;
-  while((state == NO_BARRIER) && ((commandLine = get_next(args->fd, *args->mutex_get_next)) != EOC)) {
+  int commandLine = 1;
+
+  while(commandLine != EOC) {
+    
+    pthread_mutex_lock(args->mutex_get_next);
+    if(state != NO_BARRIER)
+        break;
+    commandLine = get_next(args->fd);
     switch (commandLine){
+      case CMD_CREATE:
+        int create = parse_create(args -> fd, &event_id, &num_rows, &num_columns);
+        pthread_mutex_unlock(args->mutex_get_next); //UNLOCK
 
-            case CMD_CREATE:
-              int create = parse_create(args -> fd, &event_id, &num_rows, &num_columns);
-              pthread_mutex_unlock(args->mutex_get_next); //UNLOCK
+        if (create != 0) {
+          fprintf(stderr, "Invalid command. See HELP for usage\n");
+          break;
+        }
 
-              if (create != 0) {
-                fprintf(stderr, "Invalid command. See HELP for usage\n");
-                break;
-              }
+        //pthread_rwlock_rdlock(args->rwlock);
 
-              pthread_rwlock_rdlock(args->rwlock);
-              
-              if (ems_create(event_id, num_rows, num_columns)) {
-                fprintf(stderr, "Failed to create event\n");
-              }
-              pthread_rwlock_unlock(args->rwlock);
+        pthread_mutex_lock(args->mutex_c_l);
+        
+        if (ems_create(event_id, num_rows, num_columns)) {
+          fprintf(stderr, "Failed to create event\n");
+        }
 
-              break;
+        pthread_mutex_unlock(args->mutex_c_l);
+        //pthread_rwlock_unlock(args->rwlock);
 
-            case CMD_RESERVE:
-              num_coords = parse_reserve(args -> fd, MAX_RESERVATION_SIZE, &event_id, args -> xs, args -> ys);
-              pthread_mutex_unlock(args->mutex_get_next); //UNLOCK
+        break;
 
-              if (num_coords == 0) {
-                fprintf(stderr, "Invalid command. See HELP for usage\n");
-                break;
-              }
-              
-              
-              if (ems_reserve(event_id, num_coords, args -> xs, args -> ys)) {
-                fprintf(stderr, "Failed to reserve seats\n");
-              }
-              
-              break;
+      case CMD_RESERVE:
+        num_coords = parse_reserve(args -> fd, MAX_RESERVATION_SIZE, &event_id, args -> xs, args -> ys);
+        pthread_mutex_unlock(args->mutex_get_next); //UNLOCK
 
+        if (num_coords == 0) {
+          fprintf(stderr, "Invalid command. See HELP for usage\n");
+          break;
+        }
+        
+        sortVectors(args -> xs, args -> ys, event_id);
 
-            case CMD_SHOW:
-              int show = parse_show(args -> fd, &event_id);
-              pthread_mutex_unlock(args->mutex_get_next);
-
-              if (show != 0) {
-                fprintf(stderr, "Invalid command. See HELP for usage\n");
-                break;
-              }
+        if (ems_reserve(event_id, num_coords, args -> xs, args -> ys)) {
+          fprintf(stderr, "Failed to reserve seats\n");
+        }
+        
+        break;
 
 
-              //fazer um lock que impeça o show e o list de printarem coisas simultaneamente
-              pthread_rwlock_wrlock(args->rd_lock);
+      case CMD_SHOW:
+        int show = parse_show(args -> fd, &event_id);
+        pthread_mutex_unlock(args->mutex_get_next);
+
+        if (show != 0) {
+          fprintf(stderr, "Invalid command. See HELP for usage\n");
+          break;
+        }
+
+        pthread_mutex_lock(args->mutex_s_l);
+
+        pthread_rwlock_wrlock(args->rd_lock);
+
+        if (ems_show(event_id, args -> outFile)) {
+          fprintf(stderr, "Failed to show event\n");
+        }
+        
+        pthread_rwlock_unlock(args->rd_lock);
+
+        pthread_mutex_unlock(args->mutex_s_l);
 
 
-              if (ems_show(event_id, args -> outFile)) {
-                fprintf(stderr, "Failed to show event\n");
-              }
-              pthread_rwlock_unlock(args->rd_lock);
+        break;
 
-              break;
+      case CMD_LIST_EVENTS:
+        pthread_mutex_unlock(args->mutex_get_next);
+        
+        pthread_mutex_lock(args->mutex_s_l);
+        pthread_mutex_lock(args->mutex_c_l);
 
-            case CMD_LIST_EVENTS:
-              pthread_mutex_unlock(args->mutex_get_next);
-              
-              pthread_rwlock_wrlock(args->rd_lock);
-              pthread_rwlock_wrlock(args->rwlock);
+        if (ems_list_events(args -> outFile)) {
+          fprintf(stderr, "Failed to list events\n");
+        }
+        
+        pthread_mutex_unlock(args->mutex_c_l);
+        pthread_mutex_unlock(args->mutex_s_l);
 
-              if (ems_list_events(args -> outFile)) {
-                fprintf(stderr, "Failed to list events\n");
-              }
-              
-              pthread_rwlock_unlock(args->rwlock);
-              pthread_rwlock_unlock(args->rd_lock);
+        break;
 
-              break;
+      case CMD_WAIT: //FAZER LOCKS
 
-            case CMD_WAIT: //FAZER LOCKS
+        if (parse_wait(args -> fd, &delay, NULL) == -1) {  // thread_id is not implemented
+          fprintf(stderr, "Invalid command. See HELP for usage\n");
+          break;
+        }
+        
+        if (delay > 0) {
+          write(args -> outFile, "Waiting...\n", sizeof("Waiting...\n"));
+          ems_wait(delay);
+        }
 
-              if (parse_wait(args -> fd, &delay, NULL) == -1) {  // thread_id is not implemented
-                fprintf(stderr, "Invalid command. See HELP for usage\n");
-                break;
-              }
-              
-              if (delay > 0) {
-                write(args -> outFile, "Waiting...\n", sizeof("Waiting...\n"));
-                ems_wait(delay);
-              }
+        break;
 
-              break;
+      case CMD_INVALID: //FAZER LOCKS
 
-            case CMD_INVALID: //FAZER LOCKS
+        pthread_mutex_unlock(args->mutex_get_next);
+        fprintf(stderr, "Invalid command. See HELP for usage\n");
+        break;
 
-              pthread_mutex_unlock(args->mutex_get_next);
-              fprintf(stderr, "Invalid command. See HELP for usage\n");
-              break;
+      case CMD_HELP: //FAZER LOCKS
 
-            case CMD_HELP: //FAZER LOCKS
+        pthread_mutex_unlock(args->mutex_get_next);
+        printf(
+            "Available commands:\n"
+              "CREATE <event_id> <num_rows> <num_columns>\n"
+              "RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
+              "SHOW <event_id>\n"
+              "LIST\n"
+              "WAIT <delay_ms> [thread_id]\n"
+              "BARRIER\n"                   
+              "HELP\n");
 
-              pthread_mutex_unlock(args->mutex_get_next);
-              printf(
-                  "Available commands:\n"
-                    "CREATE <event_id> <num_rows> <num_columns>\n"
-                    "RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
-                    "SHOW <event_id>\n"
-                    "LIST\n"
-                    "WAIT <delay_ms> [thread_id]\n"
-                    "BARRIER\n"                   
-                    "HELP\n");
+        break;
 
-              break;
+      case CMD_BARRIER:
+      
+        state = BARRIER;
+        pthread_mutex_unlock(args->mutex_get_next);
+        break;
 
-            case CMD_BARRIER:
-            
-              state = BARRIER;
-              pthread_mutex_unlock(args->mutex_get_next);
-              break;
+      case CMD_EMPTY:
+        break;
 
-            case CMD_EMPTY:
-              break;
+      case EOC:
+        break;
     }
     
   }
@@ -164,6 +180,8 @@ int main(int argc, char *argv[]) {
   int const MAX_THREADS = atoi(argv[3]);
   //pthread_mutex_t mutex;
   pthread_mutex_t mutex_get_next;
+  pthread_mutex_t mutex_c_l;
+  pthread_mutex_t mutex_s_l;
   pthread_rwlock_t rwlock;
   pthread_rwlock_t rd_lock;
   
@@ -251,13 +269,23 @@ int main(int argc, char *argv[]) {
         return 1; 
     }
 
+    if (pthread_mutex_init(&mutex_c_l, NULL) != 0) {
+        fprintf(stderr,"Mutex init has failed\n"); 
+        return 1;
+    }
+
+    if (pthread_mutex_init(&mutex_s_l, NULL) != 0) {
+        fprintf(stderr,"Mutex init has failed\n"); 
+        return 1;
+    }
+
     if (pthread_rwlock_init(&rd_lock, NULL) != 0) {
         fprintf(stderr,"Rwlock init has failed\n"); 
         return 1; 
     }
 
     create_threads(MAX_THREADS, fd, outFile, xs, ys, threadState, threadVector, &mutex_get_next,
-                    &rwlock, &rd_lock);
+                    &mutex_c_l, &mutex_s_l, &rwlock, &rd_lock);
     /*for(int i = 0; i < MAX_THREADS; i++)
       threadState[i] = AVAILABLE;
 
@@ -280,7 +308,7 @@ int main(int argc, char *argv[]) {
           //dar join e colocar o state em NO_BARRIER; voltar a criar
         state = NO_BARRIER;
         create_threads(MAX_THREADS, fd, outFile, xs, ys, threadState, threadVector, &mutex_get_next,
-                    &rwlock, &rd_lock);
+                    &mutex_c_l, &mutex_s_l, &rwlock, &rd_lock);
       }
 
       else if(state == FINISHED) { //dar join e dar break no ciclo

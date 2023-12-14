@@ -11,9 +11,10 @@ struct Event {
   size_t cols;  /// Number of columns.
   size_t rows;  /// Number of rows.
   
-  pthread_rwlock_t rwlock; // event lock
-  
   unsigned int* data;  /// Array of size rows * cols with the reservations for each seat.
+  pthread_mutex_t* res_locks;  /// Array of size rows * cols with the reservations for each seat.
+
+  pthread_rwlock_t *lock_general; // Lock to block the event.
 };
 
 struct ListNode {
