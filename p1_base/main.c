@@ -36,8 +36,8 @@ void *chooseCommand(void *commandArgs) {
       fprintf(stdout,"Waiting...\n");
 
       ems_wait(waitVector[args -> threadIndex].delay);
-      pthread_mutex_unlock(&waitVector[args->threadIndex].mutex_w);
       waitVector[args -> threadIndex].delay = 0;
+      pthread_mutex_unlock(&waitVector[args->threadIndex].mutex_w);
       continue;
     }
     pthread_mutex_unlock(&waitVector[args->threadIndex].mutex_w);
