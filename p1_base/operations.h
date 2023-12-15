@@ -18,17 +18,17 @@ int ems_terminate();
 /// @return 0 if the event was created successfully, 1 otherwise.
 int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols);
 
+/// Orders two vectors that are constitute pairs. 
+/// @param xs First, most significant, vector
+/// @param ys Second vector
+/// @param num_coords Number of coordinates they represent
+/// @return 0 if the event was created successfully, 1 otherwise.
 void bubbleSort(size_t *xs, size_t *ys, size_t num_coords);
 
 /// Swaps two elements from a vector
 /// @param a pointer to element a
 /// @param b pointer to element b
 void swap(size_t *a, size_t *b); 
-
-/// Sorts two vectors taking into account they are intertwined
-/// @param xs Array of rows of the seats to reserve.
-/// @param ys Array of columns of the seats to reserve.
-void sortVectors(size_t* xs, size_t* ys, size_t numcoords);
 
 /// Creates a new reservation for the given event.
 /// @param event_id Id of the event to create a reservation for.
@@ -50,7 +50,6 @@ int ems_list_events();
 
 /// Waits for a given amount of time.
 /// @param delay_us Delay in milliseconds.
-/// @param thread_pointer pointer to the thread which we will change
 void ems_wait(unsigned int delay_ms);
 
 #endif  // EMS_OPERATIONS_H

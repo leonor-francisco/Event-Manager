@@ -19,7 +19,8 @@
 int state = NO_BARRIER;
 WaitCommand *waitVector;
 
-
+/// @brief function that is called by the threads. It calls the parsers and the ems functions.
+/// @param commandArgs 
 void *chooseCommand(void *commandArgs) {
   CommandArgs *args = (CommandArgs*) commandArgs;
   unsigned int event_id, delay;
@@ -29,13 +30,13 @@ void *chooseCommand(void *commandArgs) {
   while(commandLine != EOC) {
     pthread_mutex_lock(args->mutex_get_next);
     pthread_mutex_lock(&waitVector[args->threadIndex].mutex_w);
-    if (waitVector[args -> threadIndex].delay > 0) {
+    if (waitVector[args -> threadIndex].delay > 0) { //if a thread has a delay value to meet, its checked here
 
       pthread_mutex_unlock(args->mutex_get_next);
 
       fprintf(stdout,"Waiting...\n");
 
-      ems_wait(waitVector[args -> threadIndex].delay);
+      ems_wait(waitVector[args -> threadIndex].delay); //makes the thread sleep
       waitVector[args -> threadIndex].delay = 0;
       pthread_mutex_unlock(&waitVector[args->threadIndex].mutex_w);
       continue;
@@ -306,10 +307,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr,"Rwlock init has failed\n"); 
         return 1; 
     }
-
-
-    
-
 
 
     while(state != FINISHED) {

@@ -144,6 +144,19 @@ void bubbleSort(size_t *xs, size_t *ys, size_t num_coords) {
 
                 swapped = 1;
             }
+            else if (xs[j] == xs[j + 1]){ //orders the vector in function of the less significant vector if the most significant is the same
+              if (ys[j] > ys[j + 1]) {
+                size_t temp = ys[j];
+                ys[j] = ys[j + 1];
+                ys[j + 1] = temp;
+
+                temp = xs[j];
+                xs[j] = xs[j + 1];
+                xs[j + 1] = temp;
+
+                swapped = 1;
+              }
+            }
         }
 
         // If no elements were swapped in the inner loop, the array is already sorted
@@ -192,12 +205,10 @@ int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys)
     *get_seat_with_delay(event, seat_index(event, row, col)) = reservation_id;
     pthread_mutex_unlock(&event->res_locks[seat_index(event, row, col)]);
   }
-
-  // If the reservation was not successful, free the seats that were reserved.
-  if (i < num_seats) {
+  if (i < num_seats) {//if not all of the reservations were successful
     event->reservations--;
     for (size_t j = 0; j < i; j++) {
-      *get_seat_with_delay(event, seat_index(event, xs[j], ys[j])) = 0;
+      *get_seat_with_delay(event, seat_index(event, xs[j], ys[j])) = 0; //frees the seats
     }
     pthread_rwlock_unlock(&event->lock_general);
     return 1;
