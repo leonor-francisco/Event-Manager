@@ -5,11 +5,11 @@
 
 typedef struct waitCommand{
   unsigned int delay;
+  pthread_mutex_t mutex_w;
 } WaitCommand;
 
 typedef struct commandArgs {
   pthread_t thread_id;
-  WaitCommand *waitVector;
   int num_threads;
   int threadIndex;
   int fd;
@@ -28,7 +28,7 @@ typedef struct commandArgs {
 //void join_threads(int num_threads, int threadState[], CommandArgs threadVector[]);
 
 void create_threads(int num_threads, int fd, int outFile, CommandArgs threadVector[],
-          WaitCommand waitVector[], pthread_mutex_t *mutex_get_next, pthread_mutex_t *mutex_c_l,
+          pthread_mutex_t *mutex_get_next, pthread_mutex_t *mutex_c_l,
           pthread_mutex_t *mutex_s_l, pthread_rwlock_t *rd_lock);
 
 

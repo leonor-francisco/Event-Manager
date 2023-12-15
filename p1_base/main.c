@@ -17,6 +17,7 @@
 
 
 int state = NO_BARRIER;
+WaitCommand *waitVector;
 
 
 void *chooseCommand(void *commandArgs) {
@@ -27,14 +28,19 @@ void *chooseCommand(void *commandArgs) {
 
   while(commandLine != EOC) {
     pthread_mutex_lock(args->mutex_get_next);
-
-    if (args -> waitVector[args -> threadIndex].delay) {
+    pthread_mutex_lock(&waitVector[args->threadIndex].mutex_w);
+    if (waitVector[args -> threadIndex].delay > 0) {
 
       pthread_mutex_unlock(args->mutex_get_next);
+
       fprintf(stdout,"Waiting...\n");
-      ems_wait(args -> waitVector[args -> threadIndex].delay);
-      args -> waitVector[args -> threadIndex].delay = 0;
+
+      ems_wait(waitVector[args -> threadIndex].delay);
+      pthread_mutex_unlock(&waitVector[args->threadIndex].mutex_w);
+      waitVector[args -> threadIndex].delay = 0;
+      continue;
     }
+    pthread_mutex_unlock(&waitVector[args->threadIndex].mutex_w);
     
     if(state != NO_BARRIER) {
         pthread_mutex_unlock(args->mutex_get_next);
@@ -46,7 +52,7 @@ void *chooseCommand(void *commandArgs) {
     switch (commandLine){
       case CMD_CREATE:
         int create = parse_create(args -> fd, &event_id, &num_rows, &num_columns);
-        pthread_mutex_unlock(args->mutex_get_next); //UNLOCK
+        pthread_mutex_unlock(args->mutex_get_next);
 
         if (create != 0) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
@@ -68,7 +74,7 @@ void *chooseCommand(void *commandArgs) {
 
       case CMD_RESERVE:
         num_coords = parse_reserve(args -> fd, MAX_RESERVATION_SIZE, &event_id, args -> xs, args -> ys);
-        pthread_mutex_unlock(args->mutex_get_next); //UNLOCK
+        pthread_mutex_unlock(args->mutex_get_next);
 
         if (num_coords == 0) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
@@ -122,22 +128,29 @@ void *chooseCommand(void *commandArgs) {
 
         break;
 
-      case CMD_WAIT: //FAZER LOCKS
+      case CMD_WAIT:
         unsigned int thread_id = 0;
         int wait = parse_wait(args -> fd, &delay, &thread_id);
          
-        if (wait == -1) {  // thread_id is not implemented
+        if (wait == -1) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
+          pthread_mutex_unlock(&waitVector[args->threadIndex].mutex_w);
           pthread_mutex_unlock(args->mutex_get_next);
           break;
         }
         if(thread_id == 0  && delay > 0) {
           for(int i = 0; i < args->num_threads; i++) {
-            args->waitVector[args->threadIndex].delay = delay;  
+            pthread_mutex_lock(&waitVector[i].mutex_w);
+            waitVector[i].delay = delay;  
+            pthread_mutex_unlock(&waitVector[i].mutex_w);
           }
+
         }
         else if(delay > 0) {
-          args->waitVector[thread_id - 1].delay = delay;
+          
+          pthread_mutex_lock(&waitVector[args->threadIndex].mutex_w);
+          waitVector[thread_id - 1].delay = delay;
+          pthread_mutex_unlock(&waitVector[args->threadIndex].mutex_w);
         }
 
         pthread_mutex_unlock(args->mutex_get_next);
@@ -263,10 +276,16 @@ int main(int argc, char *argv[]) {
 
     CommandArgs threadVector[MAX_THREADS];
 
-    WaitCommand waitVector[MAX_THREADS];
-    
-    for(int i = 0; i < MAX_THREADS; i++)
+    waitVector =(WaitCommand*)malloc(sizeof(WaitCommand) * (long unsigned int) MAX_THREADS);
+
+    for(int i = 0; i < MAX_THREADS; i++) {
       waitVector[i].delay = 0;
+      if (pthread_mutex_init(&waitVector[i].mutex_w, NULL) != 0) { 
+        fprintf(stderr,"Mutex init has failed\n"); 
+        return 1; 
+      }
+    }
+
 
     if (pthread_mutex_init(&mutex_get_next, NULL) != 0) { 
         fprintf(stderr,"Mutex init has failed\n"); 
@@ -295,7 +314,7 @@ int main(int argc, char *argv[]) {
 
     while(state != FINISHED) {
       state = NO_BARRIER;
-      create_threads(MAX_THREADS, fd, outFile, threadVector, waitVector, &mutex_get_next,
+      create_threads(MAX_THREADS, fd, outFile, threadVector, &mutex_get_next,
                     &mutex_c_l, &mutex_s_l, &rd_lock);
       int returnValue;
       int flag_barrier = 0;
@@ -311,6 +330,12 @@ int main(int argc, char *argv[]) {
       }
     }
     
+    for(int i = 0; i < MAX_THREADS; i++) {
+      pthread_mutex_destroy(&waitVector[i].mutex_w);
+    }
+
+    free(waitVector);
+
     pthread_rwlock_destroy(&rd_lock);
     pthread_mutex_destroy(&mutex_get_next);
     pthread_mutex_destroy(&mutex_c_l);

@@ -5,18 +5,18 @@
 #include "constants.h"
 
 void create_threads(int num_threads, int fd, int outFile, CommandArgs threadVector[],
-          WaitCommand waitVector[], pthread_mutex_t *mutex_get_next, pthread_mutex_t *mutex_c_l,
+          pthread_mutex_t *mutex_get_next, pthread_mutex_t *mutex_c_l,
           pthread_mutex_t *mutex_s_l, pthread_rwlock_t *rd_lock) {
 
     size_t threads_xs[num_threads][MAX_RESERVATION_SIZE];
     size_t threads_ys[num_threads][MAX_RESERVATION_SIZE];
+        
     for(int i = 0; i < num_threads; i++) {
       threadVector[i].fd = fd;
       threadVector[i].outFile = outFile;
       threadVector[i].num_threads = num_threads;
       threadVector[i].xs = threads_xs[i];
       threadVector[i].ys = threads_ys[i];
-      threadVector[i].waitVector = waitVector;
       threadVector[i].threadIndex = i;
       threadVector[i].mutex_get_next = mutex_get_next;
       threadVector[i].mutex_c_l = mutex_c_l;
