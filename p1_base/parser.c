@@ -49,7 +49,7 @@ enum Command get_next(int fd) {
   char buf[16];
   if (read(fd, buf, 1) != 1)
     return EOC;
-
+  
   switch (buf[0]) {
       case 'C':
         if (read(fd, buf + 1, 6) != 6 || strncmp(buf, "CREATE ", 7) != 0) {
@@ -154,6 +154,7 @@ int parse_create(int fd, unsigned int *event_id, size_t *num_rows, size_t *num_c
 
   unsigned int u_num_cols;
   if (read_uint(fd, &u_num_cols, &ch) != 0 || (ch != '\n' && ch != '\0')) {
+    printf("3\n");
     cleanup(fd);
     return 1;
   }

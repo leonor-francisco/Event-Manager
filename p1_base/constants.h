@@ -1,10 +1,6 @@
 #define MAX_RESERVATION_SIZE 256
 #define STATE_ACCESS_DELAY_MS 10
 
-#define AVAILABLE 0
-#define JOINABLE 1
-
-#define FINISHED 2
-
-#define BARRIER 3
-#define NO_BARRIER 4
+#define FINISHED 1
+#define BARRIER 2
+#define NO_BARRIER 3

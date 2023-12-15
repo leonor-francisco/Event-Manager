@@ -23,13 +23,25 @@ void *chooseCommand(void *commandArgs) {
   CommandArgs *args = (CommandArgs*) commandArgs;
   unsigned int event_id, delay;
   size_t num_rows, num_columns, num_coords;
-  int commandLine = 1;
+  int commandLine = 13;
 
   while(commandLine != EOC) {
-    
     pthread_mutex_lock(args->mutex_get_next);
-    if(state != NO_BARRIER)
+
+    if (args -> waitVector[args -> threadIndex].delay) {
+
+      pthread_mutex_unlock(args->mutex_get_next);
+      fprintf(stdout,"Waiting...\n");
+      ems_wait(args -> waitVector[args -> threadIndex].delay);
+      args -> waitVector[args -> threadIndex].delay = 0;
+    }
+    
+    if(state != NO_BARRIER) {
+        pthread_mutex_unlock(args->mutex_get_next);
         break;
+    }
+
+    
     commandLine = get_next(args->fd);
     switch (commandLine){
       case CMD_CREATE:
@@ -40,8 +52,7 @@ void *chooseCommand(void *commandArgs) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
           break;
         }
-
-        //pthread_rwlock_rdlock(args->rwlock);
+        pthread_rwlock_wrlock(args->rd_lock);
 
         pthread_mutex_lock(args->mutex_c_l);
         
@@ -50,7 +61,8 @@ void *chooseCommand(void *commandArgs) {
         }
 
         pthread_mutex_unlock(args->mutex_c_l);
-        //pthread_rwlock_unlock(args->rwlock);
+
+        pthread_rwlock_unlock(args->rd_lock);
 
         break;
 
@@ -62,12 +74,15 @@ void *chooseCommand(void *commandArgs) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
           break;
         }
-        
-        sortVectors(args -> xs, args -> ys, event_id);
+        pthread_rwlock_rdlock(args->rd_lock);
+
+        bubbleSort(args->xs,args->ys,num_coords);
 
         if (ems_reserve(event_id, num_coords, args -> xs, args -> ys)) {
           fprintf(stderr, "Failed to reserve seats\n");
         }
+
+        pthread_rwlock_unlock(args->rd_lock);
         
         break;
 
@@ -83,13 +98,9 @@ void *chooseCommand(void *commandArgs) {
 
         pthread_mutex_lock(args->mutex_s_l);
 
-        pthread_rwlock_wrlock(args->rd_lock);
-
         if (ems_show(event_id, args -> outFile)) {
           fprintf(stderr, "Failed to show event\n");
         }
-        
-        pthread_rwlock_unlock(args->rd_lock);
 
         pthread_mutex_unlock(args->mutex_s_l);
 
@@ -112,18 +123,26 @@ void *chooseCommand(void *commandArgs) {
         break;
 
       case CMD_WAIT: //FAZER LOCKS
-
-        if (parse_wait(args -> fd, &delay, NULL) == -1) {  // thread_id is not implemented
+        unsigned int thread_id = 0;
+        int wait = parse_wait(args -> fd, &delay, &thread_id);
+         
+        if (wait == -1) {  // thread_id is not implemented
           fprintf(stderr, "Invalid command. See HELP for usage\n");
+          pthread_mutex_unlock(args->mutex_get_next);
           break;
         }
-        
-        if (delay > 0) {
-          write(args -> outFile, "Waiting...\n", sizeof("Waiting...\n"));
-          ems_wait(delay);
+        if(thread_id == 0  && delay > 0) {
+          for(int i = 0; i < args->num_threads; i++) {
+            args->waitVector[args->threadIndex].delay = delay;  
+          }
+        }
+        else if(delay > 0) {
+          args->waitVector[thread_id - 1].delay = delay;
         }
 
+        pthread_mutex_unlock(args->mutex_get_next);
         break;
+
 
       case CMD_INVALID: //FAZER LOCKS
 
@@ -134,7 +153,7 @@ void *chooseCommand(void *commandArgs) {
       case CMD_HELP: //FAZER LOCKS
 
         pthread_mutex_unlock(args->mutex_get_next);
-        printf(
+        fprintf(stdout,
             "Available commands:\n"
               "CREATE <event_id> <num_rows> <num_columns>\n"
               "RESERVE <event_id> [(<x1>,<y1>) (<x2>,<y2>) ...]\n"
@@ -150,27 +169,22 @@ void *chooseCommand(void *commandArgs) {
       
         state = BARRIER;
         pthread_mutex_unlock(args->mutex_get_next);
-        break;
+        return (void*) BARRIER;
 
       case CMD_EMPTY:
+        pthread_mutex_unlock(args->mutex_get_next);
         break;
 
       case EOC:
+        state = FINISHED;
+        pthread_mutex_unlock(args->mutex_get_next);
         break;
     }
-    
   }
 
-  *args->threadStateIndex = JOINABLE;
-  if(commandLine == EOC)
-    state = FINISHED;
-  
-  return NULL;
+  return (void*) FINISHED;
 
 }
-
-
-
 
 
 int main(int argc, char *argv[]) {
@@ -178,11 +192,9 @@ int main(int argc, char *argv[]) {
   int sonCount = 0;
   int const MAX_PROC = atoi(argv[2]);
   int const MAX_THREADS = atoi(argv[3]);
-  //pthread_mutex_t mutex;
   pthread_mutex_t mutex_get_next;
   pthread_mutex_t mutex_c_l;
   pthread_mutex_t mutex_s_l;
-  pthread_rwlock_t rwlock;
   pthread_rwlock_t rd_lock;
   
   if (argc > 1) {
@@ -234,9 +246,6 @@ int main(int argc, char *argv[]) {
     else
       continue;
 
-
-    size_t xs[MAX_RESERVATION_SIZE], ys[MAX_RESERVATION_SIZE];
-
     char *fileName = entry -> d_name;
     char *path = (char *)malloc(strlen("../jobs/")+strlen(fileName)); 
     strcpy(path, "jobs/");
@@ -253,16 +262,11 @@ int main(int argc, char *argv[]) {
     free(outPath);
 
     CommandArgs threadVector[MAX_THREADS];
-    int threadState[MAX_THREADS];
-    /*int threadCount;
-    CommandArgs thread[MAX_THREADS];
-    int joinVerify[MAX_THREADS];
-    */
 
-    if (pthread_rwlock_init(&rwlock, NULL) != 0) { 
-        fprintf(stderr,"Mutex init has failed\n"); 
-        return 1; 
-    }
+    WaitCommand waitVector[MAX_THREADS];
+    
+    for(int i = 0; i < MAX_THREADS; i++)
+      waitVector[i].delay = 0;
 
     if (pthread_mutex_init(&mutex_get_next, NULL) != 0) { 
         fprintf(stderr,"Mutex init has failed\n"); 
@@ -284,151 +288,33 @@ int main(int argc, char *argv[]) {
         return 1; 
     }
 
-    create_threads(MAX_THREADS, fd, outFile, xs, ys, threadState, threadVector, &mutex_get_next,
-                    &mutex_c_l, &mutex_s_l, &rwlock, &rd_lock);
-    /*for(int i = 0; i < MAX_THREADS; i++)
-      threadState[i] = AVAILABLE;
-
-    for(int i = 0; i < MAX_THREADS; i++) {
-      threadVector[i].fd = fd;
-      threadVector[i].outFile = outFile;
-      threadVector[i].xs = xs;
-      threadVector[i].ys = ys;
-      threadVector[i].threadStateIndex = &threadState[i];
-      threadVector[i].mutex_get_next = &mutex_get_next;
-      threadVector[i].rwlock = &rwlock;
-      threadVector[i].rd_lock = &rd_lock;
-      pthread_create(&threadVector[i].thread_id, NULL, chooseCommand, (void*)&threadVector[i]);
-    }    */
-
-
-    while(1) {
-      if(state == BARRIER) { 
-        join_threads(MAX_THREADS, threadState, threadVector);
-          //dar join e colocar o state em NO_BARRIER; voltar a criar
-        state = NO_BARRIER;
-        create_threads(MAX_THREADS, fd, outFile, xs, ys, threadState, threadVector, &mutex_get_next,
-                    &mutex_c_l, &mutex_s_l, &rwlock, &rd_lock);
-      }
-
-      else if(state == FINISHED) { //dar join e dar break no ciclo
-        join_threads(MAX_THREADS, threadState, threadVector);
-        break;
-      }
-
-
-
-      //se o state for NO_BARRIER, continua só
-        
-    }
-
-    /*int activeThreads = MAX_THREADS;
-
-    while(activeThreads > 0) {
-      for(int i = 0; i < MAX_THREADS; i++){
-        if(threadState[i] == JOINABLE) {
-          printf("\tDeu join a %d\n", i);
-          if (pthread_join(threadVector[i].thread_id, NULL) != 0)
-            fprintf(stderr, "Error joining thread.\n");
-          threadState[i] = FINISHED;
-          activeThreads--;
-        }
-      }
-    }*/
-
-
-    /*for(int i = 0; i < ; i++) {
-      if (threadState[i] == AVAILABLE || threadState[i] == JOINABLE) {
-        printf("criou thread %d\n", i);
-        threadVector[i].fd = fd;
-        threadVector[i].outFile = outFile;
-        for (int j = 0; j < MAX_RESERVATION_SIZE; j++) {
-          threadVector[i].xs[j] = xs[j];
-          threadVector[i].ys[j] = ys[j];
-        }
-        threadVector[i].threadStateIndex = &threadState[i];
-        pthread_create(&threadVector[i].thread_id, NULL, chooseCommand, (void*)&threadVector[i]);
-      }
-    }
-
-    while(retorno thread != alguma coisa){
-    */
-
-
-
-
-   /* for (int i = 0; i < MAX_THREADS; i++) {
-      if(threadState[i] == UNAVAILABLE)
-        i = 1;
-      else if(threadState[i] == JOINABLE) {
-        printf("ola %d\n", i);
-        threadState[i] = AVAILABLE;
-        if(pthread_join(threadVector[i].thread_id, NULL) != 0)
-          fprintf(stderr, "Error joining thread.\n");
-      }
-    }*/
-    /*
-    while((a = get_next(fd)) != EOC) {
-      
-      int index = thread[threadCount].threadIndex;
-
-      thread[index].a = a;
-      thread[index].delay = delay;
-      thread[index].event_id = event_id;
-      thread[index].fd = fd;
-      thread[index].num_columns = num_columns;
-      thread[index].num_rows = num_rows;
-      thread[index].outFile = outFile;
-      
-      for(int j = 0; j < MAX_RESERVATION_SIZE; j++) {
-        thread[index].xs[j] = xs[j];
-        thread[index].ys[j] = ys[j];
-      }
-      
-      pthread_create(&thread[index].thread_id, NULL, chooseCommand, (void*)(thread + i));
-      threadCount++;
-      joinVerify[index] = 1;
-      
-
-      while(threadCount == MAX_THREADS) {
-        for(int f = 0; f < MAX_THREADS; f++) {
-          if (joinVerify[f]) {
-            if(pthread_join(&thread[f].thread_id, NULL) != 0)
-              fprintf(stderr, "error joining thread.\n");
-            thread[f].threadIndex = f;
-            threadCount--;
-            joinVerify[f] = 0;
-            break;
-          }
-        }
-      }*/
-
-        /*
-        for(int f = 0; f < MAX_THREADS; f++) {
-          if (joinThreads[f]) {
-            if(pthread_join(&thread[f].thread_id, NULL) != 0)
-              fprintf(stderr, "error joining thread.\n");
-            thread[f].threadIndex;
-            i--;
-            joinThreads[f] = 0;
-          }       
-        } 
-    int f = 0;
-    //mudar para while (tem que se esperar que todas as threads acabem)
-    while(f <= ){
-      if (joinThreads[f]) {
-        if(pthread_join(&thread[f].thread_id, NULL) != 0)
-          fprintf(stderr, "error joining thread.\n");
-        joinThreads[f] = 0;
-        f++;
-      }
-    }*/
 
     
 
+
+
+    while(state != FINISHED) {
+      state = NO_BARRIER;
+      create_threads(MAX_THREADS, fd, outFile, threadVector, waitVector, &mutex_get_next,
+                    &mutex_c_l, &mutex_s_l, &rd_lock);
+      int returnValue;
+      int flag_barrier = 0;
+      for(int i = 0; i < MAX_THREADS; i++) {
+        if (pthread_join(threadVector[i].thread_id, (void**)&returnValue) != 0)
+            fprintf(stderr, "Error joining thread.\n");
+        if(returnValue == BARRIER) {
+            state = BARRIER;
+            flag_barrier = 1;
+        }
+        else if(returnValue == FINISHED && flag_barrier != 1)
+            state = FINISHED;
+      }
+    }
+    
     pthread_rwlock_destroy(&rd_lock);
     pthread_mutex_destroy(&mutex_get_next);
-    pthread_rwlock_destroy(&rwlock);
+    pthread_mutex_destroy(&mutex_c_l);
+    pthread_mutex_destroy(&mutex_s_l);
     
     close(fd);
     close(outFile);

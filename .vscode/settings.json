@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "random": "c",
-        "vector": "c"
+        "vector": "c",
+        "pthreadtypes.h": "c"
     }
 }

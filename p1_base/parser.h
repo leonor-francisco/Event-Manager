@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <pthread.h>
 
-enum Command {
+enum Command{
   CMD_CREATE,
   CMD_RESERVE,
   CMD_SHOW,

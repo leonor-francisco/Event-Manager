@@ -35,11 +35,12 @@ static void free_event(struct Event* event) {
   if (!event) return;
 
   for (size_t i = 0; i < event->cols *  event->cols; i++) {
-    pthread_mutex_destroy(event->res_locks[i]);
+    pthread_mutex_destroy(&event->res_locks[i]);
   }
-  pthread_rwlock_destroy(event->lock_general);
+  pthread_rwlock_destroy(&event->lock_general);
 
   free(event->data);
+  free(event->res_locks);
   free(event);
 }
 

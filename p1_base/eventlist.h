@@ -14,7 +14,7 @@ struct Event {
   unsigned int* data;  /// Array of size rows * cols with the reservations for each seat.
   pthread_mutex_t* res_locks;  /// Array of size rows * cols with the reservations for each seat.
 
-  pthread_rwlock_t *lock_general; // Lock to block the event.
+  pthread_rwlock_t lock_general; // Lock to block the event.
 };
 
 struct ListNode {
