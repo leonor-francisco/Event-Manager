@@ -174,11 +174,11 @@ int ems_list_events(int out_fd) {
   else {
     size_t num_events;
     read(fd_response, &num_events, sizeof(num_events));
+    unsigned int *ids = malloc(num_events * sizeof(unsigned int));
     if(num_events == 0) {
       write(out_fd, "No events\n", strlen("No events\n"));
     }
     else {
-      unsigned int ids[num_events];
       read(fd_response, ids, sizeof(ids));
       for(size_t i = 0; i < num_events; i++) {
         write(out_fd, "Event: ", strlen("Event: "));
