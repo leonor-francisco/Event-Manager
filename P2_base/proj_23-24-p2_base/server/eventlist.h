@@ -24,6 +24,7 @@ struct ListNode {
 struct EventList {
   struct ListNode* head;  // Head of the list
   struct ListNode* tail;  // Tail of the list
+  int num_events;
   pthread_rwlock_t rwl;   // Mutex to protect the list
 };
 

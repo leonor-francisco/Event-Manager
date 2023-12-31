@@ -4,3 +4,6 @@
 #define MAX_SESSION_COUNT 8
 
 #define MAX_PIPE_NAME 40
+
+#define ERROR 1
+#define VALID 0

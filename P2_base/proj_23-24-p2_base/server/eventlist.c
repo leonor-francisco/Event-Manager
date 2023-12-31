@@ -10,6 +10,7 @@ struct EventList* create_list() {
     free(list);
     return NULL;
   }
+  list->num_events = 0;
   list->head = NULL;
   list->tail = NULL;
   return list;
@@ -23,6 +24,7 @@ int append_to_list(struct EventList* list, struct Event* event) {
 
   new_node->event = event;
   new_node->next = NULL;
+  list->num_events++;
 
   if (list->head == NULL) {
     list->head = new_node;

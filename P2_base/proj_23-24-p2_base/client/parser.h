@@ -15,6 +15,18 @@ enum Command {
   EOC  // End of commands
 };
 
+enum API {
+  OP_CODE_SETUP = '1',
+  OP_CODE_QUIT = '2',
+  OP_CODE_CREATE = '3',
+  OP_CODE_RESERVE = '4',
+  OP_CODE_SHOW = '5',
+  OP_CODE_LIST = '6'
+};
+
+
+size_t seat_index_client(size_t maxRows, size_t row, size_t col);
+
 /// Reads a line and returns the corresponding command.
 /// @param fd File descriptor to read from.
 /// @return The command read.

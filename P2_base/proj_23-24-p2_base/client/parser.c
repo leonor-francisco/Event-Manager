@@ -1,4 +1,5 @@
 #include "parser.h"
+#include <stdio.h>
 
 #include <limits.h>
 #include <stdlib.h>
@@ -7,6 +8,10 @@
 
 #include "common/constants.h"
 #include "common/io.h"
+
+
+size_t seat_index_client(size_t maxRows, size_t row, size_t col) { return (row - 1) * maxRows + col - 1; }
+
 
 static void cleanup(int fd) {
   char ch;

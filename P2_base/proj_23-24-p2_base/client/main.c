@@ -15,13 +15,12 @@ int main(int argc, char* argv[]) {
             argv[0]);
     return 1;
   }
-
-
-
+  printf("vou entrar no setup\n");
   if (ems_setup(argv[1], argv[2], argv[3])) {
     fprintf(stderr, "Failed to set up EMS\n");
     return 1;
   }
+  printf("saí do setup\n");
 
   const char* dot = strrchr(argv[4], '.');
   if (dot == NULL || dot == argv[4] || strlen(dot) != 5 || strcmp(dot, ".jobs") ||
@@ -59,8 +58,9 @@ int main(int argc, char* argv[]) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
           continue;
         }
-
+        printf("entrei create\n");
         if (ems_create(event_id, num_rows, num_columns)) fprintf(stderr, "Failed to create event\n");
+
         break;
 
       case CMD_RESERVE:
@@ -79,7 +79,6 @@ int main(int argc, char* argv[]) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
           continue;
         }
-
         if (ems_show(out_fd, event_id)) fprintf(stderr, "Failed to show event\n");
         break;
 
