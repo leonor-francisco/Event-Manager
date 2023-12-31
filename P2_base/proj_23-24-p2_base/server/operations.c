@@ -273,8 +273,8 @@ int ems_list_events(int fd_responses) {
       pthread_rwlock_unlock(&event_list->rwl);
       return 1;
     }*/
-    size_t num_events = 0;
-    write(fd_responses, &error, sizeof(error));
+    int num_events = 0;
+    write(fd_responses, &valid, sizeof(valid));
     write(fd_responses, &num_events, sizeof(num_events));
     pthread_rwlock_unlock(&event_list->rwl);
     return 0;
@@ -284,6 +284,7 @@ int ems_list_events(int fd_responses) {
 
   unsigned int ids[event_list->num_events];
   int a= 0;
+  //unsigned int *buffer_ids = malloc((unsigned int)event_list->num_events * sizeof(unsigned int));
   while (1) {
 
     /*char buff[] = "Event: ";
@@ -305,7 +306,9 @@ int ems_list_events(int fd_responses) {
     }
     current = current->next;
   }
-  write(fd_responses, ids, sizeof(ids));
+  //memcpy(buffer_ids, ids, sizeof(unsigned int) * (unsigned int)event_list->num_events);
+  write(fd_responses, ids, sizeof(unsigned int) * (unsigned int) event_list->num_events);
+  //free(buffer_ids);
 
   pthread_rwlock_unlock(&event_list->rwl);
   return 0;

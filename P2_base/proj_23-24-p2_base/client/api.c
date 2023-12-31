@@ -172,20 +172,23 @@ int ems_list_events(int out_fd) {
   }
 
   else {
-    size_t num_events;
+    int num_events;
     read(fd_response, &num_events, sizeof(num_events));
-    unsigned int *ids = malloc(num_events * sizeof(unsigned int));
+    unsigned int *ids = malloc( (unsigned int) num_events * sizeof(unsigned int));
     if(num_events == 0) {
       write(out_fd, "No events\n", strlen("No events\n"));
     }
     else {
-      read(fd_response, ids, sizeof(ids));
-      for(size_t i = 0; i < num_events; i++) {
+      read(fd_response, ids, sizeof(unsigned int) * (unsigned int) num_events);
+      for(int i = 0; i < num_events; i++) {
+        char buffer[16];
+        sprintf(buffer, "%u", ids[i]);
         write(out_fd, "Event: ", strlen("Event: "));
-        write(out_fd, &ids[i], sizeof(ids[i]));
+        write(out_fd, buffer, strlen(buffer));
         write(out_fd, "\n", 1);
       }
     }
+    free(ids);
   }
 
   //TODO: send list request to the server (through the request pipe) and wait for the response (through the response pipe)
