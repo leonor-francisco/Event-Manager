@@ -1,4 +1,3 @@
-/*depois remover*/ 
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
@@ -11,6 +10,7 @@
 #include "common/constants.h"
 #include "api.h"
 #include "parser.h"
+#include "common/io.h"
 
 int session_id;
 
@@ -22,175 +22,290 @@ char resp_pipe[MAX_PIPE_NAME];
 char server_pipe[MAX_PIPE_NAME];
 
 
-int ems_setup(char const* req_pipe_path, char const* resp_pipe_path, char const* server_pipe_path) {
-  size_t len;
-  mkfifo(req_pipe_path, 0777);
-  mkfifo(resp_pipe_path, 0777);
-  printf("criei os meus fifos\n");
+int ems_setup(char const* req_pipe_path, char const* resp_pipe_path, char const* server_pipe_path) {  
+  char buffer[MAX_PIPE_NAME * 2 + 1];
+  unsigned int buffer_offset = 0;
 
-  //define request_pipe name
-  memcpy(req_pipe, req_pipe_path, sizeof(char) * strlen(req_pipe_path));
-  len = strlen(req_pipe);
-  if(len < MAX_PIPE_NAME) {
-    for(size_t i = len; i < MAX_PIPE_NAME; i++)
-      req_pipe[i] = '\0';
-  }
+  //define request_pipe and response_pipe name
+  memcpy(req_pipe, req_pipe_path, sizeof(char) * strlen(req_pipe_path) + 1);
+  memcpy(resp_pipe, resp_pipe_path, sizeof(char) * strlen(resp_pipe_path) + 1);
 
-  //define response_pipe name
-  memcpy(resp_pipe, resp_pipe_path, sizeof(char) * strlen(resp_pipe_path));
-  len = strlen(resp_pipe);
-  if(len < MAX_PIPE_NAME) {
-    for(size_t i = len; i < MAX_PIPE_NAME; i++)
-      resp_pipe[i] = '\0';
-  }
-  
   //define server_pipe name
-  memcpy(server_pipe, server_pipe_path, sizeof(char) * strlen(server_pipe_path));
-  len = strlen(server_pipe);
-  if(len < MAX_PIPE_NAME) {
-    for(size_t i = len; i < MAX_PIPE_NAME; i++)
-      server_pipe[i] = '\0';
+  strcpy(server_pipe, server_pipe_path);
+
+
+  //open register pipe for client and write both request and response pipes
+  int fd_server = open(server_pipe, O_WRONLY);
+  if(fd_server < 0) {
+    fprintf(stderr, "[ERR]: open failed: %s\n", strerror(errno)); 
+    return 1;
   }
 
-  printf("vou abrir o server_pipe\n");
-  //open register pipe for client and write both request and response pipes
-  printf("server_pipe: %s\n", server_pipe);
-  int fd_server = open(server_pipe, O_WRONLY);
-  printf("abri o pipe do server\n");
   char op_code = OP_CODE_SETUP;
-  write(fd_server, &op_code, sizeof(op_code));
-  write(fd_server, req_pipe, MAX_PIPE_NAME - 1);
-  write(fd_server, resp_pipe, MAX_PIPE_NAME - 1);
-  close(fd_server);
+
+  memset(req_pipe + strlen(req_pipe), '\0', sizeof(req_pipe) - strlen(req_pipe));
+  memset(resp_pipe + strlen(resp_pipe), '\0', sizeof(resp_pipe) - strlen(resp_pipe));
+
+  mkfifo(req_pipe, 0777);
+  mkfifo(resp_pipe, 0777);
+
+  memcpy(buffer, &op_code, sizeof(op_code));
+  buffer_offset += sizeof(op_code);
+  memcpy(buffer + buffer_offset, req_pipe, sizeof(req_pipe));
+  buffer_offset += sizeof(req_pipe);
+  memcpy(buffer + buffer_offset, resp_pipe, sizeof(resp_pipe));
   
-  //open response and request pipes
-  printf("response_pipe -> %s\nrequest_pipe -> %s\n", resp_pipe, req_pipe);
+  if(write(fd_server, buffer, sizeof(buffer)) < 0) {
+    fprintf(stderr, "Failed to write to server pipe\n");
+    return 1;
+  }
+
+  
+  if(close(fd_server) < 0) {
+    fprintf(stderr, "Failed to close file descriptor\n");
+    return 1;
+  }
+
+  //open response pipe
   fd_response = open(resp_pipe, O_RDONLY);
+  if(fd_response < 0) {
+      fprintf(stderr, "[ERR]: open failed: %s\n", strerror(errno)); 
+      return 1;
+    }
   fd_request = open(req_pipe, O_WRONLY);
+  if(fd_request < 0) {
+      fprintf(stderr, "[ERR]: open failed: %s\n", strerror(errno)); 
+      return 1;
+    }
 
   //read from response pipe the session_id associated with the client
-  read(fd_response, &session_id, sizeof(session_id));
-
-
-
-  //...TODO -> talvez falte algo
-
-
-  //TODO: create pipes and connect to the server
+  if(read(fd_response, &session_id, sizeof(session_id)) < 0) {
+    fprintf(stderr, "Failed to read from response pipe\n");
+    return 1;
+  }
   return 0;
 }
 
 int ems_quit(void) { 
   char op_code = OP_CODE_QUIT;
-  write(fd_request, &op_code, sizeof(op_code));
-  close(fd_response);
-  close(fd_request);
-  unlink(req_pipe);
-  unlink(resp_pipe);
-  //TODO: close pipes
+  unsigned int buffer_size = sizeof(op_code) + sizeof(session_id);
+  char buffer[buffer_size];
+  unsigned int buffer_offset = 0;
+  memcpy(buffer, &op_code, sizeof(op_code));
+  buffer_offset += sizeof(op_code);
+  memcpy(buffer + buffer_offset, &session_id, sizeof(session_id));
+
+  write(fd_request, buffer, sizeof(buffer));
+
+  if(close(fd_response) < 0) {
+    fprintf(stderr, "Failed to close file descriptor\n");
+    return 1;
+  }
+  if(close(fd_request) < 0) {
+    fprintf(stderr, "Failed to close file descriptor\n");
+    return 1;
+  }
+  if(unlink(req_pipe) < 0) {
+    fprintf(stderr, "Failed to unlink pipe\n");
+    return 1;
+  }
+  if(unlink(resp_pipe) < 0) {
+    fprintf(stderr, "Failed to unlink pipe\n");
+    return 1;
+  }
   return 1;
 }
 
 int ems_create(unsigned int event_id, size_t num_rows, size_t num_cols) {
   char op_code = OP_CODE_CREATE;
-  write(fd_request, &op_code, sizeof(op_code));
-  write(fd_request, &event_id, sizeof(event_id));
-  write(fd_request, &num_rows, sizeof(num_rows));
-  write(fd_request, &num_cols, sizeof(num_cols));
+  unsigned int buffer_size = sizeof(op_code) + sizeof(session_id) + sizeof(event_id) + sizeof(num_rows) + sizeof(num_cols);
+  unsigned int buffer_offset = 0;
+  char buffer[buffer_size];
+
+  memcpy(buffer, &op_code, sizeof(op_code));
+  buffer_offset += sizeof(op_code);
+  memcpy(buffer + buffer_offset, &session_id, sizeof(session_id));
+  buffer_offset += sizeof(session_id);
+  memcpy(buffer + buffer_offset, &event_id, sizeof(event_id));
+  buffer_offset += sizeof(event_id);
+  memcpy(buffer + buffer_offset, &num_rows, sizeof(num_rows));
+  buffer_offset += sizeof(num_rows);
+  memcpy(buffer + buffer_offset, &num_rows, sizeof(num_rows));
+  buffer_offset += sizeof(num_cols);
+  memcpy(buffer + buffer_offset, &num_cols, sizeof(num_cols));
+
+  if(write(fd_request, buffer, sizeof(buffer)) < 0) {
+    fprintf(stderr, "Failed to write to request pipe\n");
+    return 1;
+  }
   int response;
-  read(fd_response, &response, sizeof(response));
-  if(response) {return 1;}
+  if(read(fd_response, &response, sizeof(response)) < 0) {
+    fprintf(stderr, "Failed to read from response pipe\n");
+    return 1;
+  }
+  if(response) {
+    return 1;
+  }
   return 0;
-  //TODO: send create request to the server (through the request pipe) and wait for the response (through the response pipe)
 }
 
 int ems_reserve(unsigned int event_id, size_t num_seats, size_t* xs, size_t* ys) {
   char op_code = OP_CODE_RESERVE;
-  size_t buffer[256];
+  char buffer[sizeof(op_code) + sizeof(session_id) + sizeof(event_id) + 
+                          sizeof(num_seats) + sizeof(size_t) * num_seats * 2];
+  unsigned int buffer_offset = 0;
 
-  write(fd_request, &op_code, sizeof(op_code));
-  write(fd_request, &event_id, sizeof(event_id));
-  write(fd_request, &num_seats, sizeof(num_seats));
+  memcpy(buffer, &op_code, sizeof(op_code));
+  buffer_offset += sizeof(op_code);
+  memcpy(buffer + buffer_offset, &session_id, sizeof(session_id));
+  buffer_offset += sizeof(session_id);
+  memcpy(buffer + buffer_offset, &event_id, sizeof(event_id));
+  buffer_offset += sizeof(event_id);
+  memcpy(buffer + buffer_offset, &num_seats, sizeof(num_seats));
+  buffer_offset += sizeof(num_seats);
+  memcpy(buffer + buffer_offset, xs, sizeof(size_t) * num_seats);
+  buffer_offset += (sizeof(size_t) * num_seats);
+  memcpy(buffer + buffer_offset, ys, sizeof(size_t) * num_seats);
 
-  memcpy(buffer, xs, sizeof(size_t) * num_seats);
-  write(fd_request, buffer, sizeof(size_t) * num_seats);
-  memcpy(buffer, ys, sizeof(size_t) * num_seats);
-  write(fd_request, buffer, sizeof(size_t) * num_seats); 
+  if(write(fd_request, buffer, sizeof(buffer)) < 0) {
+    fprintf(stderr, "Failed to write to request pipe\n");
+    return 1;
+  }
   int response;
-  read(fd_response, &response, sizeof(response));
-  printf("faz read bem\n");
-  if(response) {return 1;}
+  if(read(fd_response, &response, sizeof(response)) < 0) {
+    fprintf(stderr, "Failed to read from response pipe\n");
+    return 1;
+  }
+  if(response) {
+    return 1;
+  }
   return 0;
-
-
-  // send reserve request to the server (through the request pipe) and wait for the response (through the response pipe)
 }
 
 int ems_show(int out_fd, unsigned int event_id) {
   char op_code = OP_CODE_SHOW;
-  write(fd_request, &op_code, sizeof(op_code));
-  write(fd_request, &event_id, sizeof(event_id));
+  unsigned int buffer_size = sizeof(op_code) + sizeof(session_id) + sizeof(event_id);
+  char buffer[buffer_size];
+  unsigned int buffer_offset = 0;
+
+  memcpy(buffer, &op_code, sizeof(op_code));
+  buffer_offset += sizeof(op_code);
+  memcpy(buffer + buffer_offset, &session_id, sizeof(session_id));
+  buffer_offset += sizeof(session_id);
+  memcpy(buffer + buffer_offset, &event_id, sizeof(event_id));
+
+  if(write(fd_request, buffer, sizeof(buffer)) < 0) {
+    fprintf(stderr, "Failed to write to request pipe\n");
+    return 1;
+  }
+
   int response;
-  read(fd_response, &response, sizeof(response));
+  if(read(fd_response, &response, sizeof(response)) < 0) {
+    fprintf(stderr, "Failed to read from response pipe\n");
+    return 1;
+  }
   if(response) {return 1;}
 
   else {
     size_t num_rows;
     size_t num_cols;
-    char buffer[16];
-    read(fd_response, &num_rows, sizeof(num_rows));
-    read(fd_response, &num_cols, sizeof(num_cols));
+    if(read(fd_response, &num_rows, sizeof(size_t)) < 0) {
+      fprintf(stderr, "Failed to read from response pipe\n");
+      return 1;
+    }
+    if(read(fd_response, &num_cols, sizeof(size_t)) < 0) {
+      fprintf(stderr, "Failed to read from response pipe\n");
+      return 1;
+    }
     unsigned int *seats = malloc(num_rows * num_cols * sizeof(unsigned int));
-    read(fd_response, seats, num_rows * num_cols * sizeof(unsigned int));
+    if(read(fd_response, seats, num_cols * num_rows * sizeof(unsigned int)) < 0) {
+      fprintf(stderr, "Failed to read from response pipe\n");
+      return 1;
+    }
     for(size_t i = 1; i <= num_rows; i++) {
       for(size_t j = 1; j <= num_cols; j++) {
-        sprintf(buffer, "%u", seats[seat_index_client(num_rows, i, j)]);
-        write(out_fd, buffer, strlen(buffer));
-        memset(buffer, 0, 16);
+        char buffer_write[16];
+        sprintf(buffer_write, "%u", seats[seat_index_client(num_rows, i, j)]);
+        if (print_str(out_fd, buffer_write)) {
+        perror("Error writing to file descriptor");
+        return 1;
+        }
 
         if(j < num_cols){
-          write(out_fd, " ", 1);
+          if (print_str(out_fd, " ")) {
+          perror("Error writing to file descriptor");
+          return 1;
+          }
         }
       }
-      write(out_fd, "\n", 1);
+        if (print_str(out_fd, "\n")) {
+        perror("Error writing to file descriptor");
+        return 1;
+        }
     }
     free(seats);
   }
   return 0;
-
-  
-  //TODO: send show request to the server (through the request pipe) and wait for the response (through the response pipe)
 }
 
 int ems_list_events(int out_fd) {
   char op_code = OP_CODE_LIST;
-  write(fd_request, &op_code, sizeof(op_code));
+  unsigned int buffer_size = sizeof(op_code) + sizeof(session_id);
+  char buffer[buffer_size];
+  unsigned int buffer_offset = 0;
+  memcpy(buffer, &op_code, sizeof(op_code));
+  buffer_offset += sizeof(op_code);
+  memcpy(buffer + buffer_offset, &session_id, sizeof(session_id));
+
+  if(write(fd_request, buffer, sizeof(buffer)) < 0) {
+    fprintf(stderr, "Failed to write to request pipe\n");
+    return 1;
+  }
   int response;
-  read(fd_response, &response, sizeof(response));
+  if(read(fd_response, &response, sizeof(response)) < 0) {
+    fprintf(stderr, "Failed to read from response pipe\n");
+    return 1;
+  }
   if(response) {
     return 1;
   }
 
   else {
-    int num_events;
-    read(fd_response, &num_events, sizeof(num_events));
+    size_t num_events;
+    if(read(fd_response, &num_events, sizeof(num_events)) < 0) {
+      fprintf(stderr, "Failed to read from response pipe\n");
+      return 1;
+    }
     unsigned int *ids = malloc( (unsigned int) num_events * sizeof(unsigned int));
     if(num_events == 0) {
-      write(out_fd, "No events\n", strlen("No events\n"));
+      if (print_str(out_fd, "No events\n")) {
+        perror("Error writing to file descriptor");
+        return 1;
+      }
     }
     else {
-      read(fd_response, ids, sizeof(unsigned int) * (unsigned int) num_events);
-      for(int i = 0; i < num_events; i++) {
-        char buffer[16];
-        sprintf(buffer, "%u", ids[i]);
-        write(out_fd, "Event: ", strlen("Event: "));
-        write(out_fd, buffer, strlen(buffer));
-        write(out_fd, "\n", 1);
+      if(read(fd_response, ids, sizeof(unsigned int) * (unsigned int) num_events) < 0) {
+        fprintf(stderr, "Failed to read from response pipe\n");
+        return 1;
+      }
+      for(size_t i = 0; i < num_events; i++) {
+        char buffer_list[16];
+        sprintf(buffer_list, "%u", ids[i]);
+        if (print_str(out_fd, "Event: ")) {
+          perror("Error writing to file descriptor");
+          return 1;
+        }
+        if (print_str(out_fd, buffer_list)) {
+          perror("Error writing to file descriptor");
+          return 1;
+        }
+        if (print_str(out_fd, "\n")) {
+        perror("Error writing to file descriptor");
+        return 1;
+        }
       }
     }
     free(ids);
   }
-
-  //TODO: send list request to the server (through the request pipe) and wait for the response (through the response pipe)
   return 0;
 }

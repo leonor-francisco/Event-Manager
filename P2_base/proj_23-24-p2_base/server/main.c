@@ -6,100 +6,246 @@
 #include <sys/types.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <string.h>
+#include <signal.h>
+#include <errno.h>
 
 #include "threads.h"
-#include "common/constants.h"
 #include "common/constants.h"
 #include "common/io.h"
 #include "operations.h"
 
-//pthread_t sessions[MAX_SESSION_COUNT];
+pthread_mutex_t cond_mutex;
+pthread_cond_t readFromQueue_cond;
 
-pthread_mutex_t OP_CODE_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t queueFull_mutex;
+pthread_cond_t queueFull_cond;
 
-void executeCommands (char req_pipe[MAX_PIPE_NAME], char resp_pipe[MAX_PIPE_NAME], int session_id) {
-  int fd_responses = open(resp_pipe, O_WRONLY);
-  int fd_requests = open(req_pipe, O_RDONLY);
-  write(fd_responses, &session_id, sizeof(session_id));
+struct Producer_consumer_queue *buffer_PCQ;
 
-  while(1) {
-    char op_code_buffer;
-    unsigned int event_id;
-    size_t num_rows, num_cols;
-    size_t num_seats;
-    size_t xs[MAX_RESERVATION_SIZE];
-    size_t ys[MAX_RESERVATION_SIZE];
-    int return_value;
+int server_state;
 
-    pthread_mutex_lock(&OP_CODE_mutex);
-    read(fd_requests, &op_code_buffer, sizeof(op_code_buffer));
-    printf("op_code -> %c\n", op_code_buffer);
-    switch (op_code_buffer) {
+int signal_state = 0;
 
-      case OP_CODE_CREATE:
-        
-        read(fd_requests, &event_id, sizeof(event_id));
-        read(fd_requests, &num_rows, sizeof(num_rows));
-        read(fd_requests, &num_cols, sizeof(num_cols));
-        pthread_mutex_unlock(&OP_CODE_mutex);
-        return_value = ems_create(event_id, num_rows, num_cols);
-        write(fd_responses, &return_value, sizeof(return_value));
-        break;
-
-      case OP_CODE_RESERVE:
-        printf("vou fazer agora o reserve\n");
-        read(fd_requests, &event_id, sizeof(event_id));
-        printf("primeiro read -> %d\n", event_id);
-        read(fd_requests, &num_seats, sizeof(num_seats));
-        printf("r2 -> %ld\n", num_seats);
-        read(fd_requests, xs, sizeof(size_t) * num_seats);
-        printf("r3 -> %p\n", xs);
-        read(fd_requests, ys, sizeof(size_t) * num_seats);
-        printf("r4\n");
-        pthread_mutex_unlock(&OP_CODE_mutex);
-        printf("vou fazer agora o reserve\n");
-        return_value = ems_reserve(event_id, num_seats, xs, ys);
-        printf("vou devolver o valor de return %d\n", return_value);
-        write(fd_responses, &return_value, sizeof(return_value));
-        //fazer reserve;
-        break;
-      
-      case OP_CODE_SHOW:
-        read(fd_requests, &event_id, sizeof(event_id));
-        pthread_mutex_unlock(&OP_CODE_mutex);
-        ems_show(fd_responses, event_id);
-
-        break;
-
-      case OP_CODE_LIST:
-        pthread_mutex_unlock(&OP_CODE_mutex);
-        ems_list_events(fd_responses);
-        break;
-
-      case OP_CODE_QUIT:
-        pthread_mutex_unlock(&OP_CODE_mutex);
-        close(*req_pipe);
-        close(*resp_pipe);
-        return;
-    }
-    
+static void sig_handler(int sig) {
+  if(sig == SIGUSR1) {
+    if(signal(SIGUSR1, sig_handler) == SIG_ERR) {
+      return;
+    } 
+    signal_state = 1;    
   }
-
-  
 }
 
+void *executeCommands (void *thread) {
+  Worker_thread *args = (Worker_thread*) thread;
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGUSR1);
+  pthread_sigmask(SIG_BLOCK, &mask, NULL); 
+
+  while(1) {
+    int loopCommands = 1;
+    int session_id;
+    char resp_pipe[MAX_PIPE_NAME];
+    char req_pipe[MAX_PIPE_NAME];
+    int fd_responses;
+    int fd_requests;
+
+    if(pthread_mutex_lock(&cond_mutex) != 0) {
+      fprintf(stderr, "Error locking condition mutex\n");
+      exit(EXIT_FAILURE);
+    }
 
 
+    while(buffer_PCQ->tail == NULL) {
+        pthread_cond_wait(&readFromQueue_cond, &cond_mutex);
+      
+    }
+
+    strcpy(req_pipe, buffer_PCQ->head->buffer_req);
+    strcpy(resp_pipe, buffer_PCQ->head->buffer_resp);
+    session_id = args->session_id;
+
+    fd_responses = open(resp_pipe, O_WRONLY);
+    if(fd_responses < 0) {
+      fprintf(stderr, "[ERR]: open failed: %s\n", strerror(errno)); 
+      exit(EXIT_FAILURE);
+    }
+
+    fd_requests = open(req_pipe, O_RDONLY);
+    if(fd_requests < 0) {
+      fprintf(stderr, "[ERR]: open failed: %s\n", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+
+    if(write(fd_responses, &session_id, sizeof(session_id)) < 0) {
+      fprintf(stderr, "Failed to write to response pipe\n");
+      exit(EXIT_FAILURE);
+    }
+
+    deleteAtHead(buffer_PCQ);
+
+    pthread_cond_signal(&queueFull_cond);
 
 
+    pthread_mutex_unlock(&cond_mutex);
 
+    while(loopCommands) {
+      char op_code_buffer;
+      unsigned int event_id;
+      size_t num_rows, num_cols;
+      size_t num_seats;
+      size_t xs[MAX_RESERVATION_SIZE];
+      size_t ys[MAX_RESERVATION_SIZE];
+      int return_value;
 
+      //for SHOW and LIST
+      char *sec_buffer;
+      unsigned int offset = 0; 
 
+      if(read(fd_requests, &op_code_buffer, sizeof(op_code_buffer)) < 0) {
+        fprintf(stderr, "Failed to read from request pipe\n");
+        exit(EXIT_FAILURE);
+      }
+      switch (op_code_buffer) {
 
+        case OP_CODE_CREATE:
+          if(read(fd_requests, &session_id, sizeof(session_id)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          if(read(fd_requests, &event_id, sizeof(event_id)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          if(read(fd_requests, &num_rows, sizeof(num_rows)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          if(read(fd_requests, &num_cols, sizeof(num_cols)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          return_value = ems_create(event_id, num_rows, num_cols);
+          if(write(fd_responses, &return_value, sizeof(return_value)) < 0) {
+            fprintf(stderr, "Failed to write to response pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          break;
 
+        case OP_CODE_RESERVE:
+          if(read(fd_requests, &session_id, sizeof(session_id)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          if(read(fd_requests, &event_id, sizeof(event_id)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          if(read(fd_requests, &num_seats, sizeof(num_seats)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          if(read(fd_requests, xs, sizeof(size_t) * num_seats) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          if(read(fd_requests, ys, sizeof(size_t) * num_seats) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          return_value = ems_reserve(event_id, num_seats, xs, ys);
+          if(write(fd_responses, &return_value, sizeof(return_value)) < 0) {
+            fprintf(stderr, "Failed to write to response pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          break;
+        
+        case OP_CODE_SHOW:
+          if(read(fd_requests, &session_id, sizeof(session_id)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          if(read(fd_requests, &event_id, sizeof(event_id)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          return_value = ems_show(event_id, &sec_buffer);
+          if(return_value) {
+            if(write(fd_responses, &return_value, sizeof(return_value)) < 0) {
+              fprintf(stderr, "Failed to write to response pipe\n");
+              exit(EXIT_FAILURE);
+            }
+          }
+          else {
+            size_t rows;
+            size_t cols;
 
+            memcpy(&rows, sec_buffer, sizeof(size_t));
+            offset += sizeof(size_t);
+            memcpy(&cols, sec_buffer + offset, sizeof(size_t));
+            char buffer_show[sizeof(return_value) + sizeof(size_t) * 2 + rows * cols * sizeof(unsigned int)];
+            offset = 0;
+            memcpy(buffer_show, &return_value, sizeof(return_value));
+            offset += sizeof(return_value);
+            memcpy(buffer_show + offset, sec_buffer, sizeof(size_t) * 2 + rows * cols * sizeof(unsigned int));
 
+            if(write(fd_responses, buffer_show, sizeof(buffer_show)) < 0) {
+              fprintf(stderr, "Failed to write to response pipe\n");
+              exit(EXIT_FAILURE);
+            }
+            free(sec_buffer);               
+          }
+          break;
 
+        case OP_CODE_LIST:
+          if(read(fd_requests, &session_id, sizeof(session_id)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          return_value = ems_list_events(&sec_buffer);
+          if(return_value) {
+            if(write(fd_responses, &return_value, sizeof(return_value)) < 0) {
+              fprintf(stderr, "Failed to write to response pipe\n");
+              exit(EXIT_FAILURE);
+            }
+          }
+          else {
+            size_t num_events;
+
+            memcpy(&num_events, sec_buffer, sizeof(size_t));
+            char buffer_list[sizeof(return_value) + sizeof(num_events) + num_events * sizeof(unsigned int)];
+
+            offset = 0;
+            memcpy(buffer_list, &return_value, sizeof(return_value));
+            offset += sizeof(return_value);
+
+            memcpy(buffer_list + offset, sec_buffer, sizeof(num_events) + num_events * sizeof(unsigned int));
+
+            if(write(fd_responses, buffer_list, sizeof(buffer_list)) < 0) {
+              fprintf(stderr, "Failed to write to response pipe\n");
+              exit(EXIT_FAILURE);
+            }
+            free(sec_buffer);
+
+          }
+          break;
+
+        case OP_CODE_QUIT:
+          if(read(fd_requests, &session_id, sizeof(session_id)) < 0) {
+            fprintf(stderr, "Failed to read from request pipe\n");
+            exit(EXIT_FAILURE);
+          }
+          close(*req_pipe);
+          close(*resp_pipe);
+          loopCommands = 0;
+          if(server_state == SHUT_DOWN)
+            return NULL;
+
+      }   
+    }
+  }
+}
 
 int main(int argc, char* argv[]) {
   if (argc < 2 || argc > 3) {
@@ -122,39 +268,121 @@ int main(int argc, char* argv[]) {
 
   if (ems_init(state_access_delay_us)) {
     fprintf(stderr, "Failed to initialize EMS\n");
-    return 1;
+    exit(EXIT_FAILURE);
   }
 
+  if(pthread_mutex_init(&cond_mutex, NULL) != 0) {
+    fprintf(stderr, "Failed to initialize mutex\n");
+    exit(EXIT_FAILURE);
+  }
+
+  if(pthread_cond_init(&readFromQueue_cond, NULL) != 0) {
+    fprintf(stderr, "Failed to initialize condition\n");
+    exit(EXIT_FAILURE);
+  }
+
+  if(pthread_mutex_init(&queueFull_mutex, NULL) != 0) {
+    fprintf(stderr, "Failed to initialize mutex\n");
+    exit(EXIT_FAILURE);
+  }
+
+  if(pthread_cond_init(&queueFull_cond, NULL) != 0) {
+    fprintf(stderr, "Failed to initialize condition\n");
+    exit(EXIT_FAILURE);
+  }
+
+  buffer_PCQ = initializePCQ();
+  Worker_thread threads[MAX_SESSION_COUNT];
+  
   mkfifo(argv[1], 0777);
-  printf("criei fifo server\n");
-  printf("server_pipe: %s\n", argv[1]);
-  int fd_server = open(argv[1], O_RDONLY);
-  printf("abri fifo do lado do server\n");
-  
+  int fd_server = open(argv[1], O_RDWR);
 
-  
+  if(fd_server < 0) {
+    fprintf(stderr, "[ERR]: open failed: %s\n", strerror(errno)); 
+    exit(EXIT_FAILURE);
+  }
 
-  //TODO: Intialize server, create worker threads
-    while(1) {
+  create_threads(threads);
+  server_state = NORMAL;
+
+  if (signal(SIGUSR1, sig_handler) == SIG_ERR) {
+    return 1;
+  }
+  while(1) {
     char req_pipe[MAX_PIPE_NAME];
     char resp_pipe[MAX_PIPE_NAME];
     char op_code;
-    read(fd_server, &op_code, sizeof(op_code));
-    read(fd_server, req_pipe, MAX_PIPE_NAME - 1);
-    printf("pointer -> %p\n", req_pipe);
-    read(fd_server, resp_pipe, MAX_PIPE_NAME - 1);
+    char buffer[MAX_PIPE_NAME * 2 + 1];
 
-    executeCommands(req_pipe, resp_pipe, 00);
-    break;
+    if(signal_state) {
+      sig_show();
+      signal_state = 0;
+    }
+    if(pthread_mutex_lock(&queueFull_mutex) != 0) {
+      fprintf(stderr, "Error locking condition mutex\n");
+      exit(EXIT_FAILURE);
     }
 
+    while(buffer_PCQ->event_counter >= MAX_QUEUE_SIZE) {
+      pthread_cond_wait(&queueFull_cond, &queueFull_mutex);
+    }
+
+    pthread_mutex_unlock(&queueFull_mutex);
+
+    ssize_t bytes_read = read(fd_server, buffer, sizeof(buffer)); 
+    if (bytes_read == -1) {
+      if (errno == EINTR) {
+        continue;
+      }
+      else {
+        server_state = SHUT_DOWN;
+        break;
+      }
+    }
+
+    op_code = buffer[0];
+    memcpy(req_pipe, buffer + 1, sizeof(req_pipe));
+    memcpy(resp_pipe, buffer + MAX_PIPE_NAME + 1, sizeof(resp_pipe));
 
 
 
-    //TODO: Read from pipe
-    //TODO: Write new client to the producer-consumer buffer
+    insertAtTail(buffer_PCQ, resp_pipe, req_pipe);
+    pthread_cond_signal(&readFromQueue_cond);
 
-  //TODO: Close Server
+  }
 
+  deleteQueue(buffer_PCQ);
+  free(buffer_PCQ);
+
+  for(int i = 0; i < MAX_SESSION_COUNT; i++) {
+    if(pthread_join(threads[i].thread, NULL) != 0) {
+      fprintf(stderr, "Failed to join thread\n");
+      exit(EXIT_FAILURE);
+    }
+  }
+  if(pthread_mutex_destroy(&cond_mutex) < 0) {
+    fprintf(stderr, "Failed to destroy mutex\n");
+    exit(EXIT_FAILURE);
+  }
+  if(pthread_cond_destroy(&readFromQueue_cond) < 0) {
+    fprintf(stderr, "Failed to destroy mutex\n");
+    exit(EXIT_FAILURE);
+  }
+  if(pthread_mutex_destroy(&queueFull_mutex) < 0) {
+    fprintf(stderr, "Failed to destroy mutex\n");
+    exit(EXIT_FAILURE);
+  }
+  if(pthread_cond_destroy(&queueFull_cond) < 0) {
+    fprintf(stderr, "Failed to destroy mutex\n");
+    exit(EXIT_FAILURE);
+  }
+  if(close(fd_server) < 0) {
+    fprintf(stderr, "Failed to close file descriptor\n");
+    exit(EXIT_FAILURE);
+  }
+  if(unlink(argv[1]) < 0) {
+    fprintf(stderr, "Failed to unlink pipe\n");
+    exit(EXIT_FAILURE);
+  }
   ems_terminate();
 }
